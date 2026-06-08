@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+data/statefarm/
+outputs/
+runs/
+wandb/
+
+*.onnx
+*.om
+*.pth
+*.pt
+
+.DS_Store
+Thumbs.db
