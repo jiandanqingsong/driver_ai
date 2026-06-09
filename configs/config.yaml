@@ -156,3 +156,9 @@ realtime:
     async: true
     rate: 180
     message_template: "Warning, distracted driving detected: {label}, risk level {level}"
+  web:
+    host: 127.0.0.1
+    port: 7860
+    jpeg_quality: 85
+    stats_interval_ms: 500
+    browser_voice_default: false

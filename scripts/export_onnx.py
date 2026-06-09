@@ -45,15 +45,16 @@ def main() -> None:
     if bool(config["export"]["dynamic_batch"]):
         dynamic_axes = {input_name: {0: "batch"}, output_name: {0: "batch"}}
 
-    torch.onnx.export(
-        model,
-        dummy,
-        output_path,
-        input_names=[input_name],
-        output_names=[output_name],
-        opset_version=int(config["export"]["opset_version"]),
-        dynamic_axes=dynamic_axes,
-    )
+    export_kwargs = {
+        "input_names": [input_name],
+        "output_names": [output_name],
+        "opset_version": int(config["export"]["opset_version"]),
+        "dynamic_axes": dynamic_axes,
+    }
+    try:
+        torch.onnx.export(model, dummy, output_path, dynamo=False, **export_kwargs)
+    except TypeError:
+        torch.onnx.export(model, dummy, output_path, **export_kwargs)
     print(f"ONNX exported to {output_path}")
 
 

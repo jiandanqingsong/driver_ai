@@ -41,7 +41,8 @@ E:\ascend
 │   │   ├── camera_demo.py
 │   │   ├── decision.py
 │   │   ├── risk.py
-│   │   └── smoothing.py
+│   │   ├── smoothing.py
+│   │   └── web_demo.py
 │   └── utils/
 │       ├── checkpoint.py
 │       ├── config.py
@@ -57,6 +58,7 @@ E:\ascend
 │   ├── grad_cam.py
 │   ├── prepare_splits.py
 │   ├── realtime_demo.py
+│   ├── web_demo.py
 │   └── train.py
 ├── outputs/
 ├── requirements.txt
@@ -166,6 +168,18 @@ D:\Anaconda_envs\envs\driver_ai\python.exe scripts\export_onnx.py --config confi
 D:\Anaconda_envs\envs\driver_ai\python.exe scripts\realtime_demo.py --config configs\config.yaml --source 0 --checkpoint outputs\checkpoints\mobilenet_v3_large\best.pt --model mobilenet_v3_large --device cuda
 ```
 
+运行 Web 版实时监控页面：
+
+```powershell
+D:\Anaconda_envs\envs\driver_ai\python.exe scripts\web_demo.py --config configs\config.yaml --source 0 --checkpoint outputs\checkpoints\mobilenet_v3_large\best.pt --model mobilenet_v3_large --device cuda --host 127.0.0.1 --port 7860
+```
+
+启动后在浏览器打开：
+
+```text
+http://127.0.0.1:7860
+```
+
 无窗口快速测试一帧：
 
 ```powershell
@@ -222,7 +236,7 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 
 ## 摄像头识别推理全流程
 
-实时推理入口是 `scripts/realtime_demo.py`，核心流程位于 `driver_distraction/realtime/camera_demo.py`。
+实时推理入口包括窗口版 `scripts/realtime_demo.py` 和 Web 版 `scripts/web_demo.py`。窗口版核心流程位于 `driver_distraction/realtime/camera_demo.py`，Web 版核心流程位于 `driver_distraction/realtime/web_demo.py`。
 
 1. 读取配置
 
@@ -292,6 +306,10 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 
     `draw_dashboard` 在画面顶部显示稳定后的行为标签、置信度、原始预测、margin、风险等级、风险分数、异常持续时间、冷却剩余时间和 FPS；底部绘制风险进度条。可选参数 `--save-video` 可以保存演示视频。
 
+13. Web 监控页面
+
+    Web 版使用 Python 标准库 HTTP 服务输出 `/video_feed` MJPEG 视频流，并通过 `/api/stats` 返回实时统计 JSON。网页会显示监控画面、稳定行为、置信度、风险等级、风险分数、异常持续时间、FPS、帧数、报警次数、Top 预测概率、各类别累计帧数和最近报警信息。语音提示支持后端 `pyttsx3` 播报，也支持浏览器端 Web Speech API 开关。
+
 ## 文件夹说明
 
 | 路径 | 作用 |
@@ -350,6 +368,7 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 | `driver_distraction/realtime/risk.py` | 动态风险评分、风险等级划分、异常行为持续时间统计和报警触发条件判断。 |
 | `driver_distraction/realtime/alarm.py` | 语音预警和报警冷却管理，支持 `pyttsx3` 异步播报。 |
 | `driver_distraction/realtime/camera_demo.py` | PC 摄像头实时演示核心流程：取帧、预处理、模型推理、时序平滑、拒识、风险评估、报警、可视化和视频保存。 |
+| `driver_distraction/realtime/web_demo.py` | Web 版实时监控后端，提供 MJPEG 视频流、统计 JSON、报警状态和网页界面。 |
 
 ### 昇腾部署模块
 
@@ -380,6 +399,7 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 | `scripts/grad_cam.py` | Grad-CAM 命令行入口，生成热力图和叠加图。 |
 | `scripts/export_onnx.py` | ONNX 导出入口，为后续昇腾 ATC 转 OM 做准备。 |
 | `scripts/realtime_demo.py` | PC 摄像头或视频实时演示入口。 |
+| `scripts/web_demo.py` | Web 版实时监控入口，支持本地浏览器查看画面、统计信息和语音提示。 |
 | `scripts/collect_demo_data.py` | 自采集演示场景脚本，可选择 C0-C9 类别，从摄像头按固定间隔采集图片。 |
 | `scripts/finetune_demo_scene.py` | 自采集场景小样本微调脚本，可混合原始训练集 replay 降低遗忘风险。基础版评估不使用该脚本。 |
 
@@ -401,6 +421,12 @@ ATC 转换命令模板见：
 
 ```text
 deploy/ascend_atc_template.sh
+```
+
+开发板完整部署流程见：
+
+```text
+deploy/README_board.md
 ```
 
 核心参数来自 `configs/config.yaml` 的 `ascend` 配置：

@@ -1,17 +1,42 @@
+# Python cache and local environments
 .venv/
 venv/
+env/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
 
-data/
+# Local datasets and self-collected camera data
+data/statefarm/
+data/demo_scene/
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.png
+data/**/*.mp4
+data/**/*.avi
+
+# Training, evaluation and experiment outputs
 outputs/
 runs/
 wandb/
+logs/
 
-*.onnx
-*.om
-*.pth
+# Heavy model artifacts generated locally
 *.pt
+*.pth
+*.om
+*.onnx
 
+# Deployment model exchange directory.
+# ONNX is kept here when the board needs to convert it to OM with Ascend ATC.
+!deploy/models/
+!deploy/models/.gitkeep
+!deploy/models/README.md
+!deploy/models/*.onnx
+
+# OS/editor files
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
