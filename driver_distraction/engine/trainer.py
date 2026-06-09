@@ -107,11 +107,14 @@ def current_lr(optimizer: torch.optim.Optimizer) -> float:
 
 
 def compute_macro_f1(labels, predictions, num_classes: int) -> float:
+    labels_to_score = sorted(set(map(int, labels.tolist())) | set(map(int, predictions.tolist())))
+    if not labels_to_score:
+        return 0.0
     return float(
         f1_score(
             labels,
             predictions,
-            labels=list(range(num_classes)),
+            labels=labels_to_score,
             average="macro",
             zero_division=0,
         )
