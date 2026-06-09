@@ -12,6 +12,9 @@ class RiskState:
     level: str
     abnormal_seconds: float
     should_alarm: bool
+    label: str
+    is_abnormal: bool
+    abnormal_label: str | None
 
 
 class RiskAssessor:
@@ -28,6 +31,7 @@ class RiskAssessor:
         self.risk_decay = risk_decay
         self.score = 0.0
         self.abnormal_start_time: float | None = None
+        self.abnormal_label: str | None = None
 
     def update(self, label: str, confidence: float, now: float | None = None) -> RiskState:
         now = time.time() if now is None else now
@@ -38,10 +42,12 @@ class RiskAssessor:
         self.score = max(0.0, min(100.0, self.score))
 
         is_abnormal = base_risk > 0
-        if is_abnormal and self.abnormal_start_time is None:
+        if is_abnormal and (self.abnormal_start_time is None or self.abnormal_label != label):
             self.abnormal_start_time = now
+            self.abnormal_label = label
         if not is_abnormal:
             self.abnormal_start_time = None
+            self.abnormal_label = None
 
         abnormal_seconds = 0.0 if self.abnormal_start_time is None else now - self.abnormal_start_time
         level = self.level_from_score(self.score)
@@ -51,6 +57,9 @@ class RiskAssessor:
             level=level,
             abnormal_seconds=abnormal_seconds,
             should_alarm=should_alarm,
+            label=label,
+            is_abnormal=is_abnormal,
+            abnormal_label=self.abnormal_label,
         )
 
     def level_from_score(self, score: float) -> str:

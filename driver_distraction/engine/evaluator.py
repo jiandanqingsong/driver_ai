@@ -35,7 +35,8 @@ def evaluate_model(
     preds_all: list[np.ndarray] = []
     probs_all: list[np.ndarray] = []
 
-    for images, labels in tqdm(dataloader, desc="eval", leave=False):
+    for batch in tqdm(dataloader, desc="eval", leave=False):
+        images, labels = batch[:2]
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         logits = model(images)

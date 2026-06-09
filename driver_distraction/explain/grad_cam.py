@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -11,6 +12,15 @@ from PIL import Image
 from torch import nn
 
 from driver_distraction.data.transforms import build_eval_transform
+
+
+@dataclass(frozen=True)
+class GradCAMResult:
+    overlay_path: Path
+    heatmap_path: Path
+    predicted_class: int
+    target_class: int
+    confidence: float
 
 
 class GradCAM:
@@ -34,11 +44,14 @@ class GradCAM:
         for handle in self._handles:
             handle.remove()
 
-    def __call__(self, image_tensor: torch.Tensor, target_class: int | None = None) -> tuple[np.ndarray, int]:
+    def __call__(self, image_tensor: torch.Tensor, target_class: int | None = None) -> tuple[np.ndarray, int, float]:
         self.model.zero_grad(set_to_none=True)
         logits = self.model(image_tensor)
+        probs = torch.softmax(logits, dim=1)
+        predicted_class = int(probs.argmax(dim=1).item())
         if target_class is None:
-            target_class = int(logits.argmax(dim=1).item())
+            target_class = predicted_class
+        confidence = float(probs[:, predicted_class].item())
         score = logits[:, target_class].sum()
         score.backward()
 
@@ -50,7 +63,7 @@ class GradCAM:
         cam = torch.relu(cam)
         cam = cam.detach().cpu().numpy()
         cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-        return cam, target_class
+        return cam, predicted_class, confidence
 
 
 def find_default_target_layer(model: nn.Module) -> nn.Module:
@@ -69,10 +82,15 @@ def generate_gradcam_overlay(
     device: torch.device,
     target_class: int | None = None,
     alpha: float = 0.45,
-) -> tuple[Path, int]:
+    heatmap_output_path: str | Path | None = None,
+) -> GradCAMResult:
     image_path = Path(image_path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    heatmap_path = Path(heatmap_output_path) if heatmap_output_path is not None else output_path.with_name(
+        f"{output_path.stem}_heatmap{output_path.suffix}"
+    )
+    heatmap_path.parent.mkdir(parents=True, exist_ok=True)
 
     pil_image = Image.open(image_path).convert("RGB")
     transform = build_eval_transform(input_size)
@@ -81,7 +99,7 @@ def generate_gradcam_overlay(
     model.eval()
     cam_runner = GradCAM(model, find_default_target_layer(model))
     try:
-        cam, predicted_class = cam_runner(image_tensor, target_class)
+        cam, predicted_class, confidence = cam_runner(image_tensor, target_class)
     finally:
         cam_runner.close()
 
@@ -91,4 +109,12 @@ def generate_gradcam_overlay(
     heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)
     overlay = cv2.addWeighted(raw_bgr, 1.0 - alpha, heatmap, alpha, 0)
     cv2.imwrite(str(output_path), overlay)
-    return output_path, predicted_class
+    cv2.imwrite(str(heatmap_path), heatmap)
+
+    return GradCAMResult(
+        overlay_path=output_path,
+        heatmap_path=heatmap_path,
+        predicted_class=predicted_class,
+        target_class=predicted_class if target_class is None else target_class,
+        confidence=confidence,
+    )

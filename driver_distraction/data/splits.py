@@ -10,6 +10,8 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from driver_distraction.constants import STATE_FARM_CLASS_TO_IDX
+
 
 @dataclass(frozen=True)
 class DriverSplit:
@@ -99,3 +101,31 @@ def load_split(path: str | Path) -> DriverSplit:
         val_drivers=list(data["val"]),
         test_drivers=list(data["test"]),
     )
+
+
+def save_split_manifests(
+    frames: dict[str, pd.DataFrame],
+    output_dir: str | Path,
+    image_dir: str | Path,
+) -> dict[str, Path]:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    image_dir = Path(image_dir)
+    saved_paths: dict[str, Path] = {}
+
+    for split_name, frame in frames.items():
+        manifest = frame.copy()
+        manifest["label"] = manifest["classname"].map(STATE_FARM_CLASS_TO_IDX)
+        manifest["image_path"] = manifest.apply(
+            lambda row: str(image_dir / str(row["classname"]) / str(row["img"])),
+            axis=1,
+        )
+
+        output_path = output_dir / f"{split_name}.txt"
+        with output_path.open("w", encoding="utf-8") as file:
+            for row in manifest.itertuples(index=False):
+                file.write(f"{row.image_path} {int(row.label)} {row.subject}\n")
+
+        saved_paths[split_name] = output_path
+
+    return saved_paths

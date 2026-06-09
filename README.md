@@ -72,17 +72,18 @@ pip install -r requirements.txt
 ```text
 data/statefarm/
 ├── driver_imgs_list.csv
-└── train/
-    ├── c0/
-    ├── c1/
-    ├── c2/
-    ├── c3/
-    ├── c4/
-    ├── c5/
-    ├── c6/
-    ├── c7/
-    ├── c8/
-    └── c9/
+└── imgs/
+    └── train/
+        ├── c0/
+        ├── c1/
+        ├── c2/
+        ├── c3/
+        ├── c4/
+        ├── c5/
+        ├── c6/
+        ├── c7/
+        ├── c8/
+        └── c9/
 ```
 
 类别含义：
@@ -108,6 +109,16 @@ data/statefarm/
 python scripts/prepare_splits.py --config configs/config.yaml
 ```
 
+该命令会生成：
+
+```text
+outputs/splits/
+├── statefarm_driver_split.json
+├── train.txt
+├── val.txt
+└── test.txt
+```
+
 训练主模型 MobileNetV3-Large：
 
 ```bash
@@ -117,7 +128,34 @@ python scripts/train.py --config configs/config.yaml --model mobilenet_v3_large
 训练对比模型 ResNet18：
 
 ```bash
-python scripts/train.py --config configs/config.yaml --model resnet18
+python scripts/train.py --config configs/config.yaml --model resnet18 --device cuda
+```
+
+常用训练参数覆盖：
+
+```bash
+python scripts/train.py \
+  --config configs/config.yaml \
+  --model resnet18 \
+  --device cuda \
+  --epochs 30 \
+  --batch-size 32 \
+  --lr 3e-4 \
+  --resume
+```
+
+`--resume` 不带路径时会自动尝试读取当前模型目录下的 `last.pt`。
+
+Windows 下如果出现 `Couldn't open shared file mapping` 或错误码 `1455`，通常是
+DataLoader 多进程共享内存/分页文件不足。建议使用单进程 DataLoader 续训：
+
+```bash
+python scripts/train.py \
+  --config configs/config.yaml \
+  --model resnet18 \
+  --device cuda \
+  --resume \
+  --num-workers 0
 ```
 
 评估并输出分类报告和混淆矩阵：
@@ -129,7 +167,7 @@ python scripts/evaluate.py --config configs/config.yaml --split test
 生成 Grad-CAM 可视化：
 
 ```bash
-python scripts/grad_cam.py --config configs/config.yaml --image data/statefarm/train/c1/img_1.jpg
+python scripts/grad_cam.py --config configs/config.yaml --model mobilenet_v3_large --checkpoint outputs/checkpoints/mobilenet_v3_large/best.pt --image data/statefarm/imgs/train/c0/img_100026.jpg --output outputs/gradcam/mobilenet_overlay.jpg --heatmap-output outputs/gradcam/mobilenet_heatmap.jpg
 ```
 
 导出 ONNX：
@@ -141,8 +179,22 @@ python scripts/export_onnx.py --config configs/config.yaml
 实时摄像头演示：
 
 ```bash
-python scripts/realtime_demo.py --config configs/config.yaml --source 0
+python scripts/realtime_demo.py --config configs/config.yaml --source 0 --checkpoint outputs/checkpoints/mobilenet_v3_large/best.pt --model mobilenet_v3_large --device cuda
 ```
+
+无窗口 smoke test：
+
+```bash
+python scripts/realtime_demo.py --config configs/config.yaml --source data/statefarm/imgs/train/c0/img_100026.jpg --no-window --no-voice --max-frames 1
+```
+
+采集少量自定义演示场景数据：
+
+```bash
+python scripts/collect_demo_data.py
+```
+
+脚本会先选择 `C0-C9` 分类，点击开始后等待 5 秒，每隔 0.5 秒保存一张图片，100 秒后自动结束并语音提示。图片保存到 `data/demo_scene/c0` 到 `data/demo_scene/c9`。
 
 ## 昇腾 OM 部署流程
 
@@ -164,8 +216,8 @@ bash deploy/ascend_atc_template.sh
 | `requirements.txt` | Python 依赖列表。 |
 | `driver_distraction/constants.py` | State Farm 类别映射与类别名称常量。 |
 | `driver_distraction/data/splits.py` | 基于驾驶员 ID 的 train/val/test 划分逻辑，可保存和读取 split JSON。 |
-| `driver_distraction/data/statefarm.py` | State Farm 数据集类与 DataLoader 构建入口。 |
-| `driver_distraction/data/transforms.py` | 训练、验证、测试和实时推理图像预处理。 |
+| `driver_distraction/data/statefarm.py` | State Farm 数据集类与 DataLoader 构建入口，支持 `image_path label subject` 格式 manifest。 |
+| `driver_distraction/data/transforms.py` | 训练、验证、测试和实时推理图像预处理，不使用水平翻转以避免左右手类别标签错误。 |
 | `driver_distraction/models/factory.py` | MobileNetV3-Large 与 ResNet18 模型工厂。 |
 | `driver_distraction/engine/trainer.py` | 训练循环、验证循环、优化器和调度器构建。 |
 | `driver_distraction/engine/evaluator.py` | 模型评估，输出 loss、accuracy、预测标签和概率。 |

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import cv2
@@ -14,6 +13,7 @@ from driver_distraction.constants import STATE_FARM_CLASS_NAMES
 from driver_distraction.data.transforms import build_realtime_transform
 from driver_distraction.models.factory import build_model
 from driver_distraction.realtime.alarm import AlarmManager
+from driver_distraction.realtime.decision import TemporalDecisionFilter
 from driver_distraction.realtime.risk import RiskAssessor
 from driver_distraction.realtime.smoothing import EMASmoother
 from driver_distraction.utils.checkpoint import load_checkpoint
@@ -44,7 +44,18 @@ def predict_frame(model, frame_bgr: np.ndarray, transform, device: torch.device)
     return probs
 
 
-def draw_dashboard(frame: np.ndarray, label: str, confidence: float, risk_state, display_width: int) -> np.ndarray:
+def draw_dashboard(
+    frame: np.ndarray,
+    label: str,
+    confidence: float,
+    risk_state,
+    display_width: int,
+    raw_label: str | None = None,
+    margin: float | None = None,
+    is_ambiguous: bool = False,
+    cooldown_remaining: float = 0.0,
+    fps: float | None = None,
+) -> np.ndarray:
     height, width = frame.shape[:2]
     if width != display_width:
         scale = display_width / width
@@ -59,15 +70,37 @@ def draw_dashboard(frame: np.ndarray, label: str, confidence: float, risk_state,
     color = level_colors.get(risk_state.level, (255, 255, 255))
     cv2.rectangle(frame, (0, 0), (frame.shape[1], 96), (18, 18, 18), -1)
     cv2.putText(frame, f"Behavior: {label} ({confidence:.2f})", (20, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+    if raw_label is not None:
+        suffix = " ambiguous" if is_ambiguous else ""
+        cv2.putText(
+            frame,
+            f"Raw: {raw_label} margin={margin:.2f}{suffix}",
+            (520, 32),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (220, 220, 220),
+            2,
+        )
     cv2.putText(
         frame,
-        f"Risk: {risk_state.level.upper()} score={risk_state.score:.1f} hold={risk_state.abnormal_seconds:.1f}s",
+        f"Risk: {risk_state.level.upper()} score={risk_state.score:.1f} "
+        f"hold={risk_state.abnormal_seconds:.1f}s cooldown={cooldown_remaining:.1f}s",
         (20, 72),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
         color,
         2,
     )
+    if fps is not None:
+        cv2.putText(
+            frame,
+            f"FPS: {fps:.1f}",
+            (frame.shape[1] - 130, 72),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (220, 220, 220),
+            2,
+        )
 
     bar_x, bar_y, bar_w, bar_h = 20, frame.shape[0] - 36, frame.shape[1] - 40, 18
     cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (70, 70, 70), 1)
@@ -83,7 +116,13 @@ def run_camera_demo(config: dict[str, Any], source: int | str | None = None) -> 
 
     model = load_realtime_model(config, device)
     transform = build_realtime_transform(int(realtime_cfg["input_size"]))
-    smoother = EMASmoother(float(realtime_cfg["ema_alpha"]), int(config["data"]["num_classes"]))
+    smoothing_cfg = realtime_cfg.get("temporal_smoothing", {})
+    smoothing_enabled = bool(smoothing_cfg.get("enabled", True))
+    smoother = EMASmoother(
+        alpha=float(smoothing_cfg.get("alpha", realtime_cfg.get("ema_alpha", 0.35))),
+        num_classes=int(config["data"]["num_classes"]),
+        reset_after_seconds=smoothing_cfg.get("reset_after_seconds"),
+    )
     risk_assessor = RiskAssessor(
         class_risk_weights=dict(realtime_cfg["class_risk_weights"]),
         thresholds=dict(realtime_cfg["risk_thresholds"]),
@@ -95,6 +134,7 @@ def run_camera_demo(config: dict[str, Any], source: int | str | None = None) -> 
         cooldown_seconds=float(realtime_cfg["alarm_cooldown_seconds"]),
         voice_enabled=bool(alarm_cfg.get("enabled", True)),
         rate=int(alarm_cfg.get("rate", 180)),
+        async_voice=bool(alarm_cfg.get("async", True)),
     )
 
     video_source = realtime_cfg["source"] if source is None else source
@@ -105,35 +145,137 @@ def run_camera_demo(config: dict[str, Any], source: int | str | None = None) -> 
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video source: {video_source}")
 
+    camera_cfg = realtime_cfg.get("camera", {})
+    if camera_cfg.get("width"):
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera_cfg["width"]))
+    if camera_cfg.get("height"):
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera_cfg["height"]))
+    if camera_cfg.get("fps"):
+        cap.set(cv2.CAP_PROP_FPS, float(camera_cfg["fps"]))
+
+    window_name = str(realtime_cfg.get("window_name", "Driver Distraction Risk Demo"))
+    show_window = bool(realtime_cfg.get("show_window", True))
+    save_path = realtime_cfg.get("save_video_path")
+    max_frames = realtime_cfg.get("max_frames")
+    max_frames = int(max_frames) if max_frames is not None else None
+    writer = None
+
     class_names = list(config["data"].get("class_names", STATE_FARM_CLASS_NAMES))
     unknown_label = str(realtime_cfg["unknown_label"])
     confidence_threshold = float(realtime_cfg["confidence_threshold"])
     message_template = str(alarm_cfg.get("message_template", "Distracted driving detected: {label}"))
+    decision_cfg = realtime_cfg.get("decision_filter", {})
+    decision_filter = None
+    if bool(decision_cfg.get("enabled", True)):
+        decision_filter = TemporalDecisionFilter(
+            class_names=class_names,
+            unknown_label=unknown_label,
+            confusion_pairs=decision_cfg.get("confusion_pairs", []),
+            ambiguous_margin=float(decision_cfg.get("ambiguous_margin", 0.12)),
+            switch_margin=float(decision_cfg.get("switch_margin", 0.08)),
+            min_stable_frames=int(decision_cfg.get("min_stable_frames", 4)),
+            safe_restore_frames=int(decision_cfg.get("safe_restore_frames", 8)),
+            safe_label=str(decision_cfg.get("safe_label", "safe_driving")),
+        )
 
+    fps_meter = FPSMeter()
+    frame_count = 0
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
+            frame_count += 1
 
             probs = predict_frame(model, frame, transform, device)
-            smoothed = smoother.update(probs)
-            pred_idx = int(np.argmax(smoothed))
-            confidence = float(smoothed[pred_idx])
-            label = class_names[pred_idx]
+            if smoothing_enabled:
+                ema_state = smoother.update_with_state(probs)
+                smoothed = ema_state.smoothed_probabilities
+            else:
+                ema_state = None
+                smoothed = probs
+
+            if decision_filter is not None:
+                decision = decision_filter.update(smoothed)
+                label = decision.label
+                confidence = decision.confidence
+                raw_label = class_names[ema_state.raw_index] if ema_state is not None else decision.raw_label
+                margin = ema_state.margin if ema_state is not None else decision.margin
+                is_ambiguous = decision.is_ambiguous
+            else:
+                pred_idx = int(np.argmax(smoothed))
+                confidence = float(smoothed[pred_idx])
+                label = class_names[pred_idx]
+                raw_label = class_names[ema_state.raw_index] if ema_state is not None else label
+                margin = ema_state.margin if ema_state is not None else 0.0
+                is_ambiguous = False
+
             if confidence < confidence_threshold:
                 label = unknown_label
 
             risk_state = risk_assessor.update(label, confidence)
             if risk_state.should_alarm:
                 message = message_template.format(label=label, level=risk_state.level, score=risk_state.score)
-                alarm.trigger(message)
+                alarm.trigger_event(message)
 
-            frame = draw_dashboard(frame, label, confidence, risk_state, int(realtime_cfg["display_width"]))
-            cv2.imshow("Driver Distraction Risk Demo", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key in {27, ord("q")}:
+            fps = fps_meter.update()
+            cooldown_remaining = alarm.cooldown_remaining()
+
+            frame = draw_dashboard(
+                frame,
+                label,
+                confidence,
+                risk_state,
+                int(realtime_cfg["display_width"]),
+                raw_label=raw_label,
+                margin=margin,
+                is_ambiguous=is_ambiguous,
+                cooldown_remaining=cooldown_remaining,
+                fps=fps,
+            )
+
+            if writer is None and save_path:
+                writer = build_video_writer(save_path, frame, cap)
+            if writer is not None:
+                writer.write(frame)
+
+            if show_window:
+                cv2.imshow(window_name, frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key in {27, ord("q")}:
+                    break
+            if max_frames is not None and frame_count >= max_frames:
                 break
     finally:
+        if writer is not None:
+            writer.release()
         cap.release()
-        cv2.destroyAllWindows()
+        if show_window:
+            cv2.destroyAllWindows()
+
+
+class FPSMeter:
+    def __init__(self, alpha: float = 0.9) -> None:
+        self.alpha = alpha
+        self.last_tick = cv2.getTickCount()
+        self.fps: float | None = None
+
+    def update(self) -> float:
+        now = cv2.getTickCount()
+        elapsed = (now - self.last_tick) / cv2.getTickFrequency()
+        self.last_tick = now
+        instant_fps = 1.0 / max(elapsed, 1e-8)
+        if self.fps is None:
+            self.fps = instant_fps
+        else:
+            self.fps = self.alpha * self.fps + (1.0 - self.alpha) * instant_fps
+        return self.fps
+
+
+def build_video_writer(save_path: str, frame: np.ndarray, cap) -> cv2.VideoWriter:
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 1:
+        fps = 25.0
+    height, width = frame.shape[:2]
+    return cv2.VideoWriter(str(save_path), fourcc, fps, (width, height))

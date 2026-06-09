@@ -7,7 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_fscore_support
 
 
 def write_classification_report(
@@ -61,3 +61,48 @@ def save_confusion_matrix(
     plt.savefig(output_path, dpi=200)
     plt.close()
     return cm
+
+
+def summarize_classification_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    class_names: list[str],
+) -> dict[str, float]:
+    labels = list(range(len(class_names)))
+    macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
+        y_true,
+        y_pred,
+        labels=labels,
+        average="macro",
+        zero_division=0,
+    )
+    weighted_precision, weighted_recall, weighted_f1, _ = precision_recall_fscore_support(
+        y_true,
+        y_pred,
+        labels=labels,
+        average="weighted",
+        zero_division=0,
+    )
+    return {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "macro_precision": float(macro_precision),
+        "macro_recall": float(macro_recall),
+        "macro_f1": float(macro_f1),
+        "weighted_precision": float(weighted_precision),
+        "weighted_recall": float(weighted_recall),
+        "weighted_f1": float(weighted_f1),
+    }
+
+
+def save_confusion_matrix_csv(
+    matrix: np.ndarray,
+    class_names: list[str],
+    output_path: str | Path,
+) -> None:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    header = "," + ",".join(class_names)
+    rows = [header]
+    for class_name, row in zip(class_names, matrix):
+        rows.append(f"{class_name}," + ",".join(str(int(value)) for value in row))
+    output_path.write_text("\n".join(rows) + "\n", encoding="utf-8")

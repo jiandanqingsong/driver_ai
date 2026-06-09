@@ -7,12 +7,24 @@ project:
 data:
   name: state_farm_distracted_driver_detection
   root: data/statefarm
-  image_dir: train
+  image_dir: imgs/train
   metadata_csv: driver_imgs_list.csv
   num_classes: 10
   input_size: 224
   num_workers: 4
   pin_memory: true
+  persistent_workers: false
+  prefetch_factor: 1
+  augmentation:
+    resize_size: 256
+    random_resized_crop_scale: [0.85, 1.0]
+    random_resized_crop_ratio: [0.9, 1.1]
+    rotation_degrees: 5
+    color_jitter:
+      brightness: 0.1
+      contrast: 0.1
+      saturation: 0.1
+      hue: 0.02
   class_names:
     - safe_driving
     - texting_right
@@ -32,39 +44,46 @@ data:
     explicit_val_drivers: []
     explicit_test_drivers: []
     split_file: outputs/splits/statefarm_driver_split.json
+    manifest_dir: outputs/splits
 
 train:
   model_name: mobilenet_v3_large
   compare_model_name: resnet18
   pretrained: true
+  freeze_backbone: false
+  dropout: 0.25
   batch_size: 32
-  epochs: 30
+  epochs: 12
   lr: 0.0003
-  weight_decay: 0.0001
-  label_smoothing: 0.05
+  weight_decay: 0.0005
+  label_smoothing: 0.1
+  class_weights: null
   amp: true
+  deterministic: true
+  resume: null
   optimizer: adamw
   scheduler: cosine
-  save_best_metric: val_acc
+  save_best_metric: val_macro_f1
   checkpoint_dir: outputs/checkpoints
 
 eval:
-  checkpoint: outputs/checkpoints/best.pt
+  checkpoint: outputs/checkpoints/mobilenet_v3_large/best.pt
   split: test
   batch_size: 64
   confusion_matrix_path: outputs/reports/confusion_matrix.png
   classification_report_path: outputs/reports/classification_report.txt
 
 gradcam:
-  checkpoint: outputs/checkpoints/best.pt
-  image_path: data/statefarm/train/c0/example.jpg
+  checkpoint: outputs/checkpoints/mobilenet_v3_large/best.pt
+  image_path: data/statefarm/imgs/train/c0/img_100026.jpg
   target_class: null
   output_path: outputs/gradcam/overlay.jpg
+  heatmap_output_path: outputs/gradcam/heatmap.jpg
   alpha: 0.45
 
 export:
-  checkpoint: outputs/checkpoints/best.pt
-  onnx_path: outputs/export/driver_distraction.onnx
+  checkpoint: outputs/checkpoints/mobilenet_v3_large/best.pt
+  onnx_path: outputs/export/mobilenet_v3_large_driver_distraction.onnx
   opset_version: 17
   dynamic_batch: true
   input_name: input
@@ -79,13 +98,40 @@ ascend:
 
 realtime:
   source: 0
-  checkpoint: outputs/checkpoints/best.pt
+  checkpoint: outputs/checkpoints/mobilenet_v3_large/best.pt
   model_name: mobilenet_v3_large
   input_size: 224
   display_width: 960
+  window_name: Driver Distraction Risk Demo
+  show_window: true
+  save_video_path: null
+  max_frames: null
+  camera:
+    width: 1280
+    height: 720
+    fps: 30
   confidence_threshold: 0.55
   unknown_label: unknown
   ema_alpha: 0.35
+  temporal_smoothing:
+    enabled: true
+    alpha: 0.35
+    reset_after_seconds: 1.0
+  decision_filter:
+    enabled: true
+    ambiguous_margin: 0.12
+    switch_margin: 0.08
+    min_stable_frames: 4
+    safe_restore_frames: 8
+    safe_label: safe_driving
+    confusion_pairs:
+      - [safe_driving, talking_to_passenger]
+      - [talking_to_passenger, reaching_behind]
+      - [texting_right, reaching_behind]
+      - [operating_radio, reaching_behind]
+      - [operating_radio, hair_and_makeup]
+      - [drinking, texting_right]
+      - [hair_and_makeup, reaching_behind]
   abnormal_hold_seconds: 2.0
   alarm_cooldown_seconds: 8.0
   risk_decay: 0.92
@@ -107,5 +153,6 @@ realtime:
     unknown: 40
   voice:
     enabled: true
+    async: true
     rate: 180
     message_template: "Warning, distracted driving detected: {label}, risk level {level}"
