@@ -145,6 +145,7 @@ def main() -> None:
         pretrained=bool(config["train"]["pretrained"]),
         freeze_backbone=bool(config["train"].get("freeze_backbone", False)),
         dropout=config["train"].get("dropout"),
+        drop_path_rate=config["train"].get("mobilenet_v4_drop_path"),
     ).to(device)
 
     model_info = describe_model(model, config["train"]["model_name"], int(config["data"]["num_classes"]))

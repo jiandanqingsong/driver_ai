@@ -17,7 +17,7 @@ data:
   prefetch_factor: 1
   augmentation:
     resize_size: 256
-    random_resized_crop_scale: [0.85, 1.0]
+    random_resized_crop_scale: [0.6, 1.0]
     random_resized_crop_ratio: [0.9, 1.1]
     rotation_degrees: 5
     color_jitter:
@@ -25,6 +25,16 @@ data:
       contrast: 0.1
       saturation: 0.1
       hue: 0.02
+    # RandAugment has no flip op, so it is safe for left/right action classes.
+    randaugment:
+      enabled: true
+      num_ops: 2
+      magnitude: 7
+    random_erasing:
+      enabled: true
+      p: 0.25
+      scale: [0.02, 0.2]
+      ratio: [0.3, 3.3]
   class_names:
     - safe_driving
     - texting_right
@@ -53,12 +63,22 @@ train:
   freeze_backbone: false
   dropout: 0.25
   batch_size: 32
-  epochs: 12
-  lr: 0.0003
+  epochs: 24
+  lr: 0.00015
+  warmup_epochs: 2
+  grad_clip_norm: 1.0
   weight_decay: 0.0005
   label_smoothing: 0.1
   class_weights: null
+  # Stochastic depth for MobileNetV4 (timm). Ignored by other models.
+  mobilenet_v4_drop_path: 0.1
   amp: true
+  # Exponential moving average of weights. The smoothed model is evaluated each
+  # epoch and published as best.pt, which usually generalizes a bit better.
+  ema:
+    enabled: true
+    decay: 0.999
+    warmup: true
   deterministic: true
   resume: null
   optimizer: adamw

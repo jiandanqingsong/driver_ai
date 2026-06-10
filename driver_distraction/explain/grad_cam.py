@@ -71,6 +71,11 @@ def find_default_target_layer(model: nn.Module) -> nn.Module:
         return model.features[-1]
     if hasattr(model, "layer4"):
         return model.layer4[-1]
+    # timm MobileNetV4: last conv feature map before global pooling.
+    if hasattr(model, "conv_head"):
+        return model.conv_head
+    if hasattr(model, "blocks"):
+        return model.blocks[-1]
     raise ValueError("Cannot infer target layer. Pass a CNN layer explicitly.")
 
 

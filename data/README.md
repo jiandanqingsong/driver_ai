@@ -22,3 +22,4 @@ data/statefarm/
 ```
 
 The Kaggle metadata file `driver_imgs_list.csv` is required for driver-id split.
+D:\Anaconda_envs\envs\driver_ai\python.exe scripts\evaluate.py --config configs\config.yaml --model mobilenet_v4 --checkpoint outputs\checkpoints\mobilenet_v4\best.pt --split test --batch-size 64 --num-workers 4 --output-dir outputs\reports\mobilenet_v4\test

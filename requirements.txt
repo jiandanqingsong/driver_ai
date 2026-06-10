@@ -10,3 +10,4 @@ seaborn>=0.13.0
 onnx>=1.15.0
 onnxruntime>=1.16.0
 pyttsx3>=2.90
+timm>=1.0.0

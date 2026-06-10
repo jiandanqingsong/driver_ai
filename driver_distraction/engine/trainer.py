@@ -16,6 +16,7 @@ from sklearn.metrics import f1_score
 
 from driver_distraction.engine.evaluator import evaluate_model
 from driver_distraction.utils.checkpoint import load_checkpoint, save_checkpoint
+from driver_distraction.utils.ema import ModelEMA
 
 
 @dataclass
@@ -55,18 +56,58 @@ def build_optimizer(config: dict[str, Any], model: nn.Module) -> torch.optim.Opt
     raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 
+def _wrap_with_warmup(
+    optimizer: torch.optim.Optimizer,
+    main_scheduler,
+    warmup_epochs: int,
+    start_factor: float = 0.1,
+):
+    """Prepend a linear LR warmup before the main (per-epoch) scheduler.
+
+    Both sub-schedulers step once per epoch, matching the fit() loop. Warmup
+    tames the early loss spikes seen when finetuning timm backbones at a high LR.
+    """
+    warmup = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=start_factor, total_iters=warmup_epochs
+    )
+    return torch.optim.lr_scheduler.SequentialLR(
+        optimizer, schedulers=[warmup, main_scheduler], milestones=[warmup_epochs]
+    )
+
+
 def build_scheduler(config: dict[str, Any], optimizer: torch.optim.Optimizer):
     train_cfg = config["train"]
     scheduler_name = str(train_cfg.get("scheduler", "cosine")).lower()
     epochs = int(train_cfg["epochs"])
+    warmup_epochs = int(train_cfg.get("warmup_epochs", 0) or 0)
+    # The main scheduler only governs the post-warmup epochs.
+    main_epochs = max(epochs - warmup_epochs, 1)
 
     if scheduler_name in {"none", ""}:
         return None
     if scheduler_name == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    if scheduler_name == "step":
-        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=max(epochs // 3, 1), gamma=0.1)
-    raise ValueError(f"Unsupported scheduler: {scheduler_name}")
+        main = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=main_epochs)
+    elif scheduler_name == "step":
+        main = torch.optim.lr_scheduler.StepLR(optimizer, step_size=max(main_epochs // 3, 1), gamma=0.1)
+    else:
+        raise ValueError(f"Unsupported scheduler: {scheduler_name}")
+
+    if warmup_epochs > 0:
+        return _wrap_with_warmup(optimizer, main, warmup_epochs)
+    return main
+
+
+def build_ema(config: dict[str, Any], model: nn.Module, device: torch.device) -> ModelEMA | None:
+    """Build a weight EMA tracker if enabled in the train config."""
+    ema_cfg = config["train"].get("ema")
+    if not ema_cfg or not bool(ema_cfg.get("enabled", False)):
+        return None
+    return ModelEMA(
+        model,
+        decay=float(ema_cfg.get("decay", 0.999)),
+        device=device,
+        warmup=bool(ema_cfg.get("warmup", True)),
+    )
 
 
 def build_criterion(config: dict[str, Any], device: torch.device | None = None) -> nn.Module:
@@ -149,6 +190,7 @@ def load_training_state(
     scheduler,
     scaler,
     device: torch.device,
+    ema: ModelEMA | None = None,
 ) -> tuple[int, float, int, float]:
     checkpoint = load_checkpoint(resume_path, map_location=device)
     model.load_state_dict(checkpoint["model_state"])
@@ -159,6 +201,8 @@ def load_training_state(
         scheduler.load_state_dict(checkpoint["scheduler_state"])
     if scaler is not None and checkpoint.get("scaler_state") is not None:
         scaler.load_state_dict(checkpoint["scaler_state"])
+    if ema is not None and checkpoint.get("ema_state") is not None:
+        ema.load_state_dict(checkpoint["ema_state"])
 
     start_epoch = int(checkpoint.get("epoch", 0)) + 1
     best_acc = float(checkpoint.get("best_acc", 0.0))
@@ -176,6 +220,8 @@ def train_one_epoch(
     use_amp: bool = True,
     scaler=None,
     epoch: int | None = None,
+    grad_clip_norm: float | None = None,
+    ema: ModelEMA | None = None,
 ) -> dict[str, float]:
     model.train()
     scaler = scaler or build_grad_scaler(device, use_amp)
@@ -183,6 +229,7 @@ def train_one_epoch(
     correct = 0
     total_seen = 0
     desc = "train" if epoch is None else f"train epoch {epoch}"
+    clip_norm = float(grad_clip_norm) if grad_clip_norm else 0.0
 
     for batch in tqdm(dataloader, desc=desc, leave=False):
         images, labels = batch_to_device(batch, device)
@@ -193,8 +240,14 @@ def train_one_epoch(
             loss = criterion(logits, labels)
 
         scaler.scale(loss).backward()
+        if clip_norm > 0:
+            # Unscale first so the clip threshold is in real gradient units.
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
         scaler.step(optimizer)
         scaler.update()
+        if ema is not None:
+            ema.update(model)
 
         preds = logits.detach().argmax(dim=1)
         total_loss += float(loss.item()) * labels.size(0)
@@ -222,8 +275,10 @@ def fit(
     criterion = build_criterion(config, device=device)
     optimizer = build_optimizer(config, model)
     scheduler = build_scheduler(config, optimizer)
+    ema = build_ema(config, model, device)
     use_amp = bool(train_cfg.get("amp", True))
     scaler = build_grad_scaler(device, use_amp)
+    grad_clip_norm = train_cfg.get("grad_clip_norm")
     epochs = int(train_cfg["epochs"])
     start_epoch = 1
     best_acc = 0.0
@@ -239,11 +294,14 @@ def fit(
             scheduler=scheduler,
             scaler=scaler,
             device=device,
+            ema=ema,
         )
         print(
             f"Resumed from {resume_path}, start_epoch={start_epoch}, "
             f"best_acc={best_acc:.4f}, best_metric_value={best_metric_value:.4f}"
         )
+    if ema is not None:
+        print(f"Weight EMA enabled (decay={ema.decay}, warmup={ema.warmup}).")
 
     for epoch in range(start_epoch, epochs + 1):
         epoch_start = time.time()
@@ -256,8 +314,13 @@ def fit(
             use_amp=use_amp,
             scaler=scaler,
             epoch=epoch,
+            grad_clip_norm=grad_clip_norm,
+            ema=ema,
         )
-        val_result = evaluate_model(model, dataloaders["val"], device, criterion)
+        # When EMA is on, the smoothed weights are what we publish, so they
+        # drive validation and best-checkpoint selection.
+        eval_model = ema.module if ema is not None else model
+        val_result = evaluate_model(eval_model, dataloaders["val"], device, criterion)
         val_macro_f1 = compute_macro_f1(
             val_result.labels,
             val_result.predictions,
@@ -274,10 +337,13 @@ def fit(
             best_epoch = epoch
 
         epoch_seconds = time.time() - epoch_start
+        # last.pt keeps the raw weights so training can resume exactly; the EMA
+        # shadow is stored alongside so resume can restore it too.
         state = {
             "epoch": epoch,
             "best_epoch": best_epoch,
             "model_state": model.state_dict(),
+            "ema_state": ema.state_dict() if ema is not None else None,
             "optimizer_state": optimizer.state_dict(),
             "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
             "scaler_state": scaler.state_dict() if scaler is not None else None,
@@ -288,7 +354,12 @@ def fit(
         }
         save_checkpoint(state, checkpoint_dir / "last.pt")
         if is_best:
-            save_checkpoint(state, checkpoint_dir / "best.pt")
+            # Publish the evaluated weights (EMA when enabled) as best.pt so all
+            # downstream consumers load the better model with no extra changes.
+            best_state = dict(state)
+            if ema is not None:
+                best_state["model_state"] = ema.module.state_dict()
+            save_checkpoint(best_state, checkpoint_dir / "best.pt")
 
         history_row = {
             "epoch": epoch,
@@ -306,12 +377,13 @@ def fit(
         }
         append_history_row(history_path, history_row)
 
+        val_tag = "ema " if ema is not None else ""
         print(
             f"Epoch {epoch:03d}/{epochs} "
             f"lr={history_row['lr']:.6g} "
             f"train_loss={train_metrics['loss']:.4f} train_acc={train_metrics['acc']:.4f} "
-            f"val_loss={val_result.loss:.4f} val_acc={val_result.accuracy:.4f} "
-            f"val_macro_f1={val_macro_f1:.4f} "
+            f"{val_tag}val_loss={val_result.loss:.4f} {val_tag}val_acc={val_result.accuracy:.4f} "
+            f"{val_tag}val_macro_f1={val_macro_f1:.4f} "
             f"best_{best_metric}={best_metric_value:.4f} time={epoch_seconds:.1f}s"
         )
 

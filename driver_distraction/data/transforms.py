@@ -24,22 +24,47 @@ def build_train_transform(input_size: int, augmentation: dict[str, Any] | None =
     crop_ratio = _pair(augmentation.get("random_resized_crop_ratio"), (0.9, 1.1))
     jitter_cfg = augmentation.get("color_jitter", {})
     rotation_degrees = float(augmentation.get("rotation_degrees", 5))
+    randaug_cfg = augmentation.get("randaugment", {}) or {}
+    erasing_cfg = augmentation.get("random_erasing", {}) or {}
 
-    return transforms.Compose(
-        [
-            transforms.Resize(resize_size),
-            transforms.RandomResizedCrop(input_size, scale=crop_scale, ratio=crop_ratio),
-            transforms.ColorJitter(
-                brightness=float(jitter_cfg.get("brightness", 0.1)),
-                contrast=float(jitter_cfg.get("contrast", 0.1)),
-                saturation=float(jitter_cfg.get("saturation", 0.1)),
-                hue=float(jitter_cfg.get("hue", 0.02)),
-            ),
-            transforms.RandomRotation(degrees=rotation_degrees),
-            transforms.ToTensor(),
-            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-        ]
-    )
+    # NOTE: never add a horizontal flip here. The classes encode left/right hand
+    # actions (texting_left vs texting_right, ...), so flipping corrupts labels.
+    # torchvision RandAugment's op space contains no flip, so it is safe to use.
+    pil_ops = [
+        transforms.Resize(resize_size),
+        transforms.RandomResizedCrop(input_size, scale=crop_scale, ratio=crop_ratio),
+        transforms.ColorJitter(
+            brightness=float(jitter_cfg.get("brightness", 0.1)),
+            contrast=float(jitter_cfg.get("contrast", 0.1)),
+            saturation=float(jitter_cfg.get("saturation", 0.1)),
+            hue=float(jitter_cfg.get("hue", 0.02)),
+        ),
+        transforms.RandomRotation(degrees=rotation_degrees),
+    ]
+
+    if bool(randaug_cfg.get("enabled", False)):
+        pil_ops.append(
+            transforms.RandAugment(
+                num_ops=int(randaug_cfg.get("num_ops", 2)),
+                magnitude=int(randaug_cfg.get("magnitude", 7)),
+            )
+        )
+
+    tensor_ops = [
+        transforms.ToTensor(),
+        transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+    ]
+
+    if bool(erasing_cfg.get("enabled", False)):
+        tensor_ops.append(
+            transforms.RandomErasing(
+                p=float(erasing_cfg.get("p", 0.25)),
+                scale=_pair(erasing_cfg.get("scale"), (0.02, 0.2)),
+                ratio=_pair(erasing_cfg.get("ratio"), (0.3, 3.3)),
+            )
+        )
+
+    return transforms.Compose(pil_ops + tensor_ops)
 
 
 def build_eval_transform(input_size: int, resize_size: int = 256):
