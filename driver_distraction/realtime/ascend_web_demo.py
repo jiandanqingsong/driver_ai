@@ -1,20 +1,20 @@
-"""Web dashboard for realtime driver distraction inference."""
+"""Ascend OM realtime camera worker with the shared web dashboard."""
 
 from __future__ import annotations
 
 import json
 import threading
 import time
+from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import cv2
 import numpy as np
-import torch
 
 from driver_distraction.constants import STATE_FARM_CLASS_NAMES
-from driver_distraction.data.transforms import build_realtime_transform
+from driver_distraction.deploy.acl_infer import AscendOMClassifier, preprocess_bgr_frame, softmax
 from driver_distraction.realtime.alarm import AlarmManager
-from driver_distraction.realtime.camera_demo import FPSMeter, load_realtime_model, predict_frame
 from driver_distraction.realtime.capture import open_optimized_capture
 from driver_distraction.realtime.decision import TemporalDecisionFilter
 from driver_distraction.realtime.risk import RiskAssessor
@@ -22,41 +22,73 @@ from driver_distraction.realtime.smoothing import EMASmoother
 from driver_distraction.realtime.web_server import build_index_html, create_web_server, safe_print
 
 
-class RealtimeWebWorker:
-    """Owns camera capture, inference state and latest web-facing results."""
+class FPSMeter:
+    def __init__(self, alpha: float = 0.9) -> None:
+        self.alpha = float(alpha)
+        self.last_tick = time.perf_counter()
+        self.fps: float | None = None
 
-    def __init__(self, config: dict[str, Any], source: int | str | None = None) -> None:
+    def update(self) -> float:
+        now = time.perf_counter()
+        instant_fps = 1.0 / max(now - self.last_tick, 1e-8)
+        self.last_tick = now
+        if self.fps is None:
+            self.fps = instant_fps
+        else:
+            self.fps = self.alpha * self.fps + (1.0 - self.alpha) * instant_fps
+        return self.fps
+
+
+class AscendRealtimeWebWorker:
+    """Own the camera, OM model and temporal risk state for the board web demo."""
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        model_path: str | Path,
+        source: int | str | None = None,
+        device_id: int = 0,
+        output_dtype: str = "auto",
+        server_voice_enabled: bool = False,
+        acl_module: ModuleType | None = None,
+    ) -> None:
         self.config = config
         self.realtime_cfg = config["realtime"]
         self.source = self.realtime_cfg["source"] if source is None else source
         if isinstance(self.source, str) and self.source.isdigit():
             self.source = int(self.source)
 
-        device_name = str(config["project"].get("device", "cuda"))
-        if device_name.startswith("cuda") and torch.cuda.is_available():
-            self.device = torch.device(device_name)
-        else:
-            self.device = torch.device("cpu")
-
+        self.device_id = int(device_id)
+        self.model_path = Path(model_path)
         self.class_names = list(config["data"].get("class_names", STATE_FARM_CLASS_NAMES))
+        self.num_classes = len(self.class_names)
         self.unknown_label = str(self.realtime_cfg["unknown_label"])
-        self.model = load_realtime_model(config, self.device)
-        self.transform = build_realtime_transform(int(self.realtime_cfg["input_size"]))
+        self.input_size = int(self.realtime_cfg.get("input_size", 224))
+        self.resize_size = int(config.get("data", {}).get("augmentation", {}).get("resize_size", 256))
         self.jpeg_quality = int(self.realtime_cfg.get("web", {}).get("jpeg_quality", 85))
         self.max_frames = self.realtime_cfg.get("max_frames")
         self.max_frames = int(self.max_frames) if self.max_frames is not None else None
+        self.server_voice_enabled = bool(server_voice_enabled)
+
+        self.model = AscendOMClassifier(
+            model_path=self.model_path,
+            device_id=self.device_id,
+            num_classes=self.num_classes,
+            output_dtype=output_dtype,
+            acl_module=acl_module,
+        )
 
         self._stop_event = threading.Event()
         self._condition = threading.Condition()
         self._thread: threading.Thread | None = None
         self._latest_jpeg: bytes | None = None
+        self._closed = False
         self._last_alarm_id = 0
         self._last_alarm_message = ""
         self._last_alarm_time = 0.0
         self._last_alarm_label = ""
         self._last_alarm_level = "normal"
         self._status = self._initial_stats("initializing")
-
         self._build_runtime_state()
 
     def _build_runtime_state(self) -> None:
@@ -64,7 +96,7 @@ class RealtimeWebWorker:
         self.smoothing_enabled = bool(smoothing_cfg.get("enabled", True))
         self.smoother = EMASmoother(
             alpha=float(smoothing_cfg.get("alpha", self.realtime_cfg.get("ema_alpha", 0.35))),
-            num_classes=int(self.config["data"]["num_classes"]),
+            num_classes=self.num_classes,
             reset_after_seconds=smoothing_cfg.get("reset_after_seconds"),
         )
         self.risk_assessor = RiskAssessor(
@@ -73,10 +105,11 @@ class RealtimeWebWorker:
             abnormal_hold_seconds=float(self.realtime_cfg["abnormal_hold_seconds"]),
             risk_decay=float(self.realtime_cfg["risk_decay"]),
         )
+
         alarm_cfg = self.realtime_cfg.get("voice", {})
         self.alarm = AlarmManager(
             cooldown_seconds=float(self.realtime_cfg["alarm_cooldown_seconds"]),
-            voice_enabled=bool(alarm_cfg.get("enabled", True)),
+            voice_enabled=self.server_voice_enabled,
             rate=int(alarm_cfg.get("rate", 180)),
             async_voice=bool(alarm_cfg.get("async", True)),
         )
@@ -106,9 +139,9 @@ class RealtimeWebWorker:
         return {
             "status": status,
             "source": str(self.source),
-            "device": str(self.device),
-            "model": str(self.realtime_cfg.get("model_name", self.config["train"]["model_name"])),
-            "checkpoint": str(self.realtime_cfg["checkpoint"]),
+            "device": f"Ascend:{self.device_id}",
+            "model": "mobilenet_v3_large",
+            "checkpoint": str(self.model_path),
             "frame_count": 0,
             "runtime_seconds": 0.0,
             "fps": 0.0,
@@ -139,8 +172,12 @@ class RealtimeWebWorker:
                 "triggered": False,
             },
             "config": {
-                "smoothing_enabled": bool(self.realtime_cfg.get("temporal_smoothing", {}).get("enabled", True)),
-                "decision_filter_enabled": bool(self.realtime_cfg.get("decision_filter", {}).get("enabled", True)),
+                "smoothing_enabled": bool(
+                    self.realtime_cfg.get("temporal_smoothing", {}).get("enabled", True)
+                ),
+                "decision_filter_enabled": bool(
+                    self.realtime_cfg.get("decision_filter", {}).get("enabled", True)
+                ),
                 "confidence_threshold": float(self.realtime_cfg["confidence_threshold"]),
                 "abnormal_hold_seconds": float(self.realtime_cfg["abnormal_hold_seconds"]),
                 "alarm_cooldown_seconds": float(self.realtime_cfg["alarm_cooldown_seconds"]),
@@ -153,7 +190,7 @@ class RealtimeWebWorker:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, name="realtime-web-worker", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="ascend-web-worker", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -162,6 +199,13 @@ class RealtimeWebWorker:
             self._condition.notify_all()
         if self._thread is not None:
             self._thread.join(timeout=3.0)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.stop()
+        self.model.close()
 
     def reset_statistics(self) -> None:
         with self._condition:
@@ -204,11 +248,11 @@ class RealtimeWebWorker:
             return json.loads(json.dumps(self._status))
 
     def _run(self) -> None:
-        cap = None
+        capture = None
         try:
             self._set_status("opening")
             camera_cfg = self.realtime_cfg.get("camera", {})
-            cap = open_optimized_capture(
+            capture = open_optimized_capture(
                 source=self.source,
                 width=int(camera_cfg.get("width", 0) or 0),
                 height=int(camera_cfg.get("height", 0) or 0),
@@ -227,44 +271,58 @@ class RealtimeWebWorker:
                     self._set_status("finished")
                     break
 
-                ok, frame = cap.read()
-                if not ok:
+                ok, frame = capture.read()
+                if not ok or frame is None:
                     self._set_status("finished")
                     break
-
                 self._process_frame(frame)
         except Exception as exc:
             self._set_status("error", error=str(exc))
         finally:
-            if cap is not None:
-                cap.release()
+            if capture is not None:
+                capture.release()
             if self._stop_event.is_set():
                 self._set_status("stopped")
 
     def _process_frame(self, frame: np.ndarray) -> None:
         self.frame_count += 1
-        probs = predict_frame(self.model, frame, self.transform, self.device)
+        tensor = preprocess_bgr_frame(
+            frame,
+            input_size=self.input_size,
+            resize_size=self.resize_size,
+        )
+        logits = self.model.infer(tensor)
+        if logits.size < self.num_classes:
+            raise ValueError(
+                f"OM output contains {logits.size} values, expected at least {self.num_classes}"
+            )
+        probabilities = softmax(logits[: self.num_classes])
+
         if self.smoothing_enabled:
-            ema_state = self.smoother.update_with_state(probs)
+            ema_state = self.smoother.update_with_state(probabilities)
             smoothed = ema_state.smoothed_probabilities
         else:
             ema_state = None
-            smoothed = probs
+            smoothed = probabilities
 
         if self.decision_filter is not None:
             decision = self.decision_filter.update(smoothed)
             label = decision.label
             confidence = decision.confidence
             raw_label = self.class_names[ema_state.raw_index] if ema_state is not None else decision.raw_label
-            raw_confidence = float(ema_state.raw_confidence) if ema_state is not None else decision.raw_confidence
+            raw_confidence = (
+                float(ema_state.raw_confidence) if ema_state is not None else decision.raw_confidence
+            )
             margin = float(ema_state.margin) if ema_state is not None else decision.margin
             is_ambiguous = bool(decision.is_ambiguous)
         else:
-            pred_idx = int(np.argmax(smoothed))
-            confidence = float(smoothed[pred_idx])
-            label = self.class_names[pred_idx]
+            prediction_index = int(np.argmax(smoothed))
+            confidence = float(smoothed[prediction_index])
+            label = self.class_names[prediction_index]
             raw_label = self.class_names[ema_state.raw_index] if ema_state is not None else label
-            raw_confidence = float(ema_state.raw_confidence) if ema_state is not None else confidence
+            raw_confidence = (
+                float(ema_state.raw_confidence) if ema_state is not None else confidence
+            )
             margin = float(ema_state.margin) if ema_state is not None else 0.0
             is_ambiguous = False
 
@@ -275,8 +333,17 @@ class RealtimeWebWorker:
         alarm_event = None
         if risk_state.should_alarm:
             alarm_cfg = self.realtime_cfg.get("voice", {})
-            message_template = str(alarm_cfg.get("message_template", "Distracted driving detected: {label}"))
-            message = message_template.format(label=label, level=risk_state.level, score=risk_state.score)
+            template = str(
+                alarm_cfg.get(
+                    "message_template",
+                    "Warning, distracted driving detected: {label}, risk level {level}",
+                )
+            )
+            message = template.format(
+                label=label,
+                level=risk_state.level,
+                score=risk_state.score,
+            )
             alarm_event = self.alarm.trigger_event(message)
             if alarm_event.triggered:
                 self.alarm_count += 1
@@ -289,21 +356,26 @@ class RealtimeWebWorker:
         fps = self.fps_meter.update()
         cooldown_remaining = self.alarm.cooldown_remaining()
         self.class_counts[label] = self.class_counts.get(label, 0) + 1
-        self.risk_level_counts[risk_state.level] = self.risk_level_counts.get(risk_state.level, 0) + 1
-        top_predictions = self._top_predictions(smoothed)
+        self.risk_level_counts[risk_state.level] = (
+            self.risk_level_counts.get(risk_state.level, 0) + 1
+        )
 
         display_frame = self._prepare_web_frame(frame)
-        ok, encoded = cv2.imencode(".jpg", display_frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-        if not ok:
+        encoded_ok, encoded = cv2.imencode(
+            ".jpg",
+            display_frame,
+            [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality],
+        )
+        if not encoded_ok:
             return
 
         alarm_triggered = bool(alarm_event.triggered) if alarm_event is not None else False
         status = {
             "status": "running",
             "source": str(self.source),
-            "device": str(self.device),
-            "model": str(self.realtime_cfg.get("model_name", self.config["train"]["model_name"])),
-            "checkpoint": str(self.realtime_cfg["checkpoint"]),
+            "device": f"Ascend:{self.device_id}",
+            "model": "mobilenet_v3_large",
+            "checkpoint": str(self.model_path),
             "frame_count": int(self.frame_count),
             "runtime_seconds": float(time.time() - self.started_at),
             "fps": float(fps),
@@ -321,7 +393,7 @@ class RealtimeWebWorker:
                 "abnormal_label": risk_state.abnormal_label,
             },
             "cooldown_remaining": float(cooldown_remaining),
-            "top_predictions": top_predictions,
+            "top_predictions": self._top_predictions(smoothed),
             "class_counts": self.class_counts.copy(),
             "risk_level_counts": self.risk_level_counts.copy(),
             "alarm": {
@@ -352,7 +424,11 @@ class RealtimeWebWorker:
         interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         return cv2.resize(frame, (target_width, target_height), interpolation=interpolation)
 
-    def _top_predictions(self, probabilities: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
+    def _top_predictions(
+        self,
+        probabilities: np.ndarray,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]:
         order = np.argsort(probabilities)[::-1][:top_k]
         return [
             {
@@ -371,44 +447,65 @@ class RealtimeWebWorker:
             self._status = current
             self._condition.notify_all()
 
+    def __enter__(self) -> "AscendRealtimeWebWorker":
+        return self
 
-def run_web_demo(
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
+
+def run_ascend_web_demo(
     config: dict[str, Any],
+    model_path: str | Path,
     source: int | str | None = None,
-    host: str | None = None,
+    device_id: int = 0,
+    output_dtype: str = "auto",
+    host: str = "0.0.0.0",
     port: int | None = None,
+    browser_voice_default: bool | None = None,
+    server_voice_enabled: bool = False,
     smoke_test: bool = False,
 ) -> None:
     web_cfg = config["realtime"].get("web", {})
-    host = host or str(web_cfg.get("host", "127.0.0.1"))
     port = int(port or web_cfg.get("port", 7860))
-    worker = RealtimeWebWorker(config, source=source)
+    if browser_voice_default is None:
+        browser_voice_default = bool(web_cfg.get("browser_voice_default", False))
+
+    worker = AscendRealtimeWebWorker(
+        config=config,
+        model_path=model_path,
+        source=source,
+        device_id=device_id,
+        output_dtype=output_dtype,
+        server_voice_enabled=server_voice_enabled,
+    )
     worker.start()
 
     if smoke_test:
-        deadline = time.time() + 20.0
+        deadline = time.time() + 30.0
         while time.time() < deadline:
             stats = worker.get_stats()
             if stats.get("frame_count", 0) > 0 or stats.get("status") in {"error", "finished"}:
                 print(json.dumps(stats, ensure_ascii=False, indent=2))
-                worker.stop()
+                worker.close()
                 return
             time.sleep(0.2)
-        worker.stop()
-        raise TimeoutError("Web demo smoke test timed out before processing a frame.")
+        worker.close()
+        raise TimeoutError("Ascend web demo smoke test timed out before processing a frame.")
 
     index_html = build_index_html(
-        browser_voice_default=bool(web_cfg.get("browser_voice_default", False)),
+        browser_voice_default=bool(browser_voice_default),
         stats_interval_ms=int(web_cfg.get("stats_interval_ms", 500)),
     )
     server = create_web_server(host, port, worker, index_html)
-    safe_print(f"Web demo running at http://{host}:{port}")
+    safe_print(f"Ascend OM web demo running at http://{host}:{port}")
+    safe_print(f"Open http://<board-ip>:{port} from a browser on the same network.")
     safe_print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        safe_print("Stopping web demo.")
+        safe_print("Stopping Ascend OM web demo.")
     finally:
         server.shutdown()
         server.server_close()
-        worker.stop()
+        worker.close()

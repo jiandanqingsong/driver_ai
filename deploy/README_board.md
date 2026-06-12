@@ -321,20 +321,152 @@ python3 scripts/ascend_infer.py \
 
 ## 9. 关于 Web 实时监控
 
-当前 `scripts/web_demo.py` 是 PC/PyTorch 版 Web 演示入口，加载的是 `.pt` checkpoint，并使用 PyTorch 做推理。它适合在训练机或普通 PC 上展示完整的 EMA、风险评分、报警冷却和网页统计面板。
+项目提供了独立的昇腾 OM Web 实时演示入口：
 
-在昇腾开发板上使用 `.om` 模型实时推理时，推荐路线是：
+```text
+scripts/ascend_web_demo.py
+```
 
-1. 使用本文档完成 ONNX 到 OM 转换。
-2. 复用 `driver_distraction/deploy/acl_infer.py` 中的 `AscendOMClassifier`。
-3. 复用项目中的后处理逻辑：
-   - `driver_distraction/realtime/smoothing.py`
-   - `driver_distraction/realtime/decision.py`
-   - `driver_distraction/realtime/risk.py`
-   - `driver_distraction/realtime/alarm.py`
-4. 将 `web_demo.py` 中的 PyTorch `predict_frame` 替换为 OM 推理结果。
+该入口直接调用 OM 模型，不加载 PyTorch、torchvision 或 `.pt` checkpoint，
+并复用 PC 版的网页样式和以下实时逻辑：
 
-也就是说，板端最终运行时不需要训练代码、State Farm 数据集、PyTorch checkpoint 或训练日志，只需要源码、配置、ONNX/OM 模型和 OM 推理入口。
+- EMA 时序平滑。
+- 易混淆行为决策过滤。
+- 低置信度未知行为拒识。
+- 动态风险评分。
+- 异常持续时间判断。
+- 报警冷却。
+- 浏览器中文语音预警。
+- 行为概率、FPS、帧数和报警统计。
+
+### 9.1 安装摄像头依赖
+
+确认 OpenCV 可用：
+
+```bash
+python3 -c "import cv2; print(cv2.__version__)"
+```
+
+如果系统没有 OpenCV，优先使用开发板系统包：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-opencv
+```
+
+也可以在存在 aarch64 wheel 时安装：
+
+```bash
+python3 -m pip install opencv-python-headless
+```
+
+检查摄像头设备：
+
+```bash
+ls -l /dev/video*
+```
+
+当前用户没有摄像头权限时：
+
+```bash
+sudo usermod -aG video "${USER}"
+```
+
+重新登录开发板后权限才会生效。
+
+### 9.2 一键启动
+
+使用默认 OM 模型和摄像头 `0`：
+
+```bash
+bash deploy/run_ascend_web.sh
+```
+
+指定 OM 模型和摄像头：
+
+```bash
+bash deploy/run_ascend_web.sh \
+  deploy/models/mobilenet_v3_large_demo_finetune_driver_distraction.om \
+  0
+```
+
+指定端口或昇腾设备：
+
+```bash
+PORT=8080 ASCEND_DEVICE_ID=0 bash deploy/run_ascend_web.sh
+```
+
+### 9.3 直接运行 Python
+
+```bash
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+python3 scripts/ascend_web_demo.py \
+  --config configs/config.yaml \
+  --model deploy/models/mobilenet_v3_large_demo_finetune_driver_distraction.om \
+  --source 0 \
+  --device-id 0 \
+  --host 0.0.0.0 \
+  --port 7860 \
+  --browser-voice-default
+```
+
+服务器启动后，查看开发板 IP：
+
+```bash
+hostname -I
+```
+
+在同一局域网的电脑或手机浏览器中访问：
+
+```text
+http://<开发板IP>:7860
+```
+
+例如：
+
+```text
+http://192.168.1.50:7860
+```
+
+浏览器语音在访问页面的电脑或手机上播放，不要求开发板安装音频驱动。
+如果需要从开发板扬声器播放 `pyttsx3` 语音，可以添加：
+
+```bash
+python3 scripts/ascend_web_demo.py \
+  --model deploy/models/mobilenet_v3_large_demo_finetune_driver_distraction.om \
+  --source 0 \
+  --server-voice
+```
+
+### 9.4 使用视频文件测试
+
+没有摄像头时，可以先使用视频文件验证：
+
+```bash
+python3 scripts/ascend_web_demo.py \
+  --model deploy/models/mobilenet_v3_large_demo_finetune_driver_distraction.om \
+  --source data/test_driver.mp4 \
+  --host 0.0.0.0 \
+  --port 7860
+```
+
+### 9.5 运行链路
+
+板端实时推理流程为：
+
+1. OpenCV 读取摄像头最新帧。
+2. BGR 转 RGB。
+3. `Resize(256) + CenterCrop(224) + ImageNet Normalize`。
+4. 将 FP32 NCHW Tensor 复制到昇腾设备内存。
+5. 执行 OM 模型并获取 `1×10 logits`。
+6. softmax 后进入 EMA 和决策过滤。
+7. 计算风险等级、异常持续时间和报警状态。
+8. JPEG 编码后通过 MJPEG 推送到网页。
+9. 浏览器每 500 ms 读取统计接口并更新中文页面。
+
+板端最终运行时只需要源码、配置和 OM 模型，不需要训练数据、
+PyTorch checkpoint、训练日志或 ONNX 文件。
 
 ## 10. 常见问题
 
@@ -381,3 +513,40 @@ python3 -c "import acl; print(acl)"
 
 确认 OM 模型输入为固定的 `1,3,224,224 FP32`。当前程序会检查输入字节数，
 不匹配时会直接报告模型期望值和实际 Tensor 大小。
+
+### 网页只能在开发板本机打开
+
+确认服务使用：
+
+```text
+--host 0.0.0.0
+```
+
+并检查端口：
+
+```bash
+ss -lntp | grep 7860
+```
+
+如果开发板启用了防火墙，需要放行端口：
+
+```bash
+sudo ufw allow 7860/tcp
+```
+
+### 摄像头打开失败
+
+检查设备和权限：
+
+```bash
+ls -l /dev/video*
+v4l2-ctl --list-devices
+```
+
+显式使用 V4L2 后端：
+
+```bash
+python3 scripts/ascend_web_demo.py \
+  --source 0 \
+  --camera-backend v4l2
+```

@@ -1,2 +1,7 @@
 numpy>=1.21
 Pillow>=9.0
+PyYAML>=6.0
+
+# OpenCV is also required for camera capture. Prefer the board image package:
+#   sudo apt-get install python3-opencv
+# or install opencv-python-headless when an aarch64 wheel is available.

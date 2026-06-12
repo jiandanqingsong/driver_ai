@@ -385,6 +385,8 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 | `driver_distraction/realtime/capture.py` | 优化 OpenCV 摄像头初始化，支持后端选择、MJPG、低缓冲和只保留最新帧，减少 Windows USB 摄像头启动等待与推理延迟。 |
 | `driver_distraction/realtime/camera_demo.py` | PC 摄像头实时演示核心流程：取帧、预处理、模型推理、时序平滑、拒识、风险评估、报警、可视化和视频保存。 |
 | `driver_distraction/realtime/web_demo.py` | Web 版实时监控后端，提供 MJPEG 视频流、统计 JSON、中文报警状态和模板加载。 |
+| `driver_distraction/realtime/web_server.py` | PC 与昇腾板端共用的 HTTP、JSON API 和 MJPEG 视频流服务。 |
+| `driver_distraction/realtime/ascend_web_demo.py` | 昇腾 OM 板端实时 Web Worker，负责摄像头、OM 推理、时序平滑、风险评估和报警状态。 |
 | `driver_distraction/realtime/web_dashboard.html` | Web 监控界面，负责中文行为映射、风险可视化、概率统计、浏览器语音和响应式布局。 |
 
 ### 昇腾部署模块
@@ -419,6 +421,7 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 | `scripts/grad_cam.py` | Grad-CAM 命令行入口，生成热力图和叠加图。 |
 | `scripts/export_onnx.py` | ONNX 导出入口，为后续昇腾 ATC 转 OM 做准备。 |
 | `scripts/ascend_infer.py` | 昇腾开发板 OM 单图推理入口，支持中文 Top-K 结果、JSON 输出和延迟测试。 |
+| `scripts/ascend_web_demo.py` | 昇腾开发板 OM 实时 Web 演示入口，不依赖 PyTorch checkpoint。 |
 | `scripts/realtime_demo.py` | PC 摄像头或视频实时演示入口。 |
 | `scripts/web_demo.py` | Web 版实时监控入口，支持本地浏览器查看画面、统计信息和语音提示。 |
 | `scripts/collect_demo_data.py` | 自采集演示场景脚本，可选择 C0-C9 类别，从摄像头按固定间隔采集图片。 |

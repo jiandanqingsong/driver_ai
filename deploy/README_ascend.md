@@ -47,3 +47,9 @@ AscendCL Python directly and keeps preprocessing consistent with
 `driver_distraction/data/transforms.py`.
 
 See `deploy/README_board.md` for the complete board workflow.
+
+Run the realtime OM web dashboard:
+
+```bash
+bash deploy/run_ascend_web.sh
+```

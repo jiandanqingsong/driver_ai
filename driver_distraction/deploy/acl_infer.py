@@ -64,6 +64,31 @@ def preprocess_image(
     with Image.open(image_path) as opened:
         image = opened.convert("RGB")
 
+    return preprocess_pil_image(image, input_size=input_size, resize_size=resize_size)
+
+
+def preprocess_bgr_frame(
+    frame: np.ndarray,
+    input_size: int = 224,
+    resize_size: int = 256,
+) -> np.ndarray:
+    """Convert an OpenCV BGR frame to the exported model input tensor."""
+
+    frame = np.asarray(frame)
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise ValueError(f"Expected a BGR frame shaped (H, W, 3), got {frame.shape}")
+    rgb = np.ascontiguousarray(frame[:, :, ::-1])
+    image = Image.fromarray(rgb, mode="RGB")
+    return preprocess_pil_image(image, input_size=input_size, resize_size=resize_size)
+
+
+def preprocess_pil_image(
+    image: Image.Image,
+    input_size: int = 224,
+    resize_size: int = 256,
+) -> np.ndarray:
+    """Preprocess an RGB PIL image using torchvision-compatible geometry."""
+
     width, height = image.size
     if width <= 0 or height <= 0:
         raise ValueError(f"Invalid image size: {image.size}")
