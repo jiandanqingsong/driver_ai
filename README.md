@@ -399,6 +399,7 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 | `deploy/README_board.md` | 昇腾开发板部署与 ACL Python 单图推理说明。 |
 | `deploy/requirements_board.txt` | 板端最小 Python 依赖，不包含由 CANN 提供的 `acl` 模块。 |
 | `deploy/ascend_atc_template.sh` | ATC 命令模板脚本，用于在 Ascend Toolkit 环境中转换 OM 模型。 |
+| `deploy/convert_mobilenet_v4_ema_balanced_to_om.sh` | 将 MobileNetV4 EMA 平衡微调版 ONNX 固定为 batch=1 并转换为 OM。 |
 
 ### 工具模块
 

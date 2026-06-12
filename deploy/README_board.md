@@ -167,6 +167,49 @@ bash deploy/ascend_atc_template.sh \
 ls -lh deploy/models/*.om
 ```
 
+### MobileNetV4 EMA 平衡微调版
+
+已导出的 ONNX：
+
+```text
+deploy/models/mobilenet_v4_ema_demo_finetune_balanced_driver_distraction.onnx
+```
+
+使用专用脚本转换：
+
+```bash
+bash deploy/convert_mobilenet_v4_ema_balanced_to_om.sh
+```
+
+默认生成：
+
+```text
+deploy/models/mobilenet_v4_ema_demo_finetune_balanced_driver_distraction.om
+```
+
+脚本默认参数：
+
+```text
+SOC_VERSION=Ascend310B4
+INPUT_SHAPE=input:1,3,224,224
+PRECISION_MODE=allow_fp32_to_fp16
+```
+
+其他芯片型号可覆盖 `SOC_VERSION`：
+
+```bash
+SOC_VERSION=Ascend310P3 \
+  bash deploy/convert_mobilenet_v4_ema_balanced_to_om.sh
+```
+
+手动指定输入和输出路径：
+
+```bash
+bash deploy/convert_mobilenet_v4_ema_balanced_to_om.sh \
+  deploy/models/mobilenet_v4_ema_demo_finetune_balanced_driver_distraction.onnx \
+  deploy/models/mobilenet_v4_ema_demo_finetune_balanced_driver_distraction.om
+```
+
 ## 6. 板端推理输入输出约定
 
 模型输入：

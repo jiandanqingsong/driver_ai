@@ -16,6 +16,12 @@ Run this step on a machine with Ascend Toolkit installed:
 bash deploy/ascend_atc_template.sh
 ```
 
+For the MobileNetV4 EMA balanced fine-tuned model:
+
+```bash
+bash deploy/convert_mobilenet_v4_ema_balanced_to_om.sh
+```
+
 Or generate the command in Python:
 
 ```python
