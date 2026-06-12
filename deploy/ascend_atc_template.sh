@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_ONNX_PATH="${1:-${ROOT_DIR}/deploy/models/mobilenet_v3_large_demo_finetune_driver_distraction.onnx}"
 CONFIG_OM_PATH="${2:-${ROOT_DIR}/deploy/models/mobilenet_v3_large_demo_finetune_driver_distraction.om}"
-SOC_VERSION="${SOC_VERSION:-Ascend310P3}"
+SOC_VERSION="${SOC_VERSION:-Ascend310B4}"
 INPUT_SHAPE="${INPUT_SHAPE:-input:1,3,224,224}"
 PRECISION_MODE="${PRECISION_MODE:-allow_fp32_to_fp16}"
 

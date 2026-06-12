@@ -15,27 +15,34 @@ sys.path.insert(0, str(ROOT))
 from driver_distraction.data.statefarm import StateFarmDataset, build_loader_kwargs
 from driver_distraction.data.transforms import build_eval_transform, build_train_transform
 from driver_distraction.engine.trainer import fit
-from driver_distraction.models.factory import build_model, describe_model
+from driver_distraction.models.factory import SUPPORTED_MODELS, build_model, describe_model
 from driver_distraction.utils.checkpoint import load_checkpoint
 from driver_distraction.utils.config import load_config, save_config
 from driver_distraction.utils.seed import seed_everything
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fine-tune MobileNetV3-Large on self-collected demo-scene data.")
+    parser = argparse.ArgumentParser(description="Fine-tune a supported classifier on self-collected demo-scene data.")
     parser.add_argument("--config", default="configs/config.yaml")
     parser.add_argument("--demo-root", default="data/demo_scene")
     parser.add_argument("--base-checkpoint", default="outputs/checkpoints/mobilenet_v3_large/best.pt")
     parser.add_argument("--checkpoint-dir", default="outputs/checkpoints/mobilenet_v3_large_demo_finetune")
     parser.add_argument("--manifest-dir", default="outputs/demo_scene")
-    parser.add_argument("--model", default="mobilenet_v3_large")
+    parser.add_argument("--model", default="mobilenet_v3_large", choices=SUPPORTED_MODELS)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--weight-decay", type=float, default=5e-4)
+    parser.add_argument("--warmup-epochs", type=int, default=0)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-ratio", type=float, default=0.2)
+    parser.add_argument(
+        "--val-split-mode",
+        choices=("random", "tail"),
+        default="tail",
+        help="Use each class's final contiguous block for stricter validation, or randomly split frames.",
+    )
     parser.add_argument("--demo-repeat", type=int, default=3, help="Repeat demo train samples in mixed training manifest.")
     parser.add_argument("--replay-manifest", default="outputs/splits/train.txt")
     parser.add_argument("--replay-per-class", type=int, default=80)
@@ -43,6 +50,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", nargs="?", const="auto", default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--freeze-backbone", action="store_true")
+    parser.add_argument("--drop-path-rate", type=float, default=None)
+    parser.add_argument("--ema-decay", type=float, default=None)
+    parser.add_argument("--no-ema", action="store_true")
+    parser.add_argument("--prepare-only", action="store_true", help="Only generate manifests, then exit.")
     return parser.parse_args()
 
 
@@ -65,6 +76,7 @@ def split_demo_samples(
     samples_by_label: dict[int, list[str]],
     val_ratio: float,
     seed: int,
+    mode: str,
 ) -> tuple[list[str], list[str]]:
     rng = random.Random(seed)
     train_lines: list[str] = []
@@ -72,10 +84,14 @@ def split_demo_samples(
 
     for label, lines in sorted(samples_by_label.items()):
         lines = list(lines)
-        rng.shuffle(lines)
         val_count = max(1, int(round(len(lines) * val_ratio)))
-        val_lines.extend(lines[:val_count])
-        train_lines.extend(lines[val_count:])
+        if mode == "random":
+            rng.shuffle(lines)
+            val_lines.extend(lines[:val_count])
+            train_lines.extend(lines[val_count:])
+        else:
+            train_lines.extend(lines[:-val_count])
+            val_lines.extend(lines[-val_count:])
 
     rng.shuffle(train_lines)
     rng.shuffle(val_lines)
@@ -124,7 +140,12 @@ def build_demo_manifests(args: argparse.Namespace) -> dict[str, Path]:
     if not samples_by_label:
         raise RuntimeError(f"No demo images found under {args.demo_root}")
 
-    train_lines, val_lines = split_demo_samples(samples_by_label, args.val_ratio, args.seed)
+    train_lines, val_lines = split_demo_samples(
+        samples_by_label,
+        args.val_ratio,
+        args.seed,
+        args.val_split_mode,
+    )
     replay_lines = [] if args.no_replay else sample_replay_lines(args.replay_manifest, args.replay_per_class, args.seed)
     mixed_lines = train_lines * max(1, int(args.demo_repeat)) + replay_lines
     random.Random(args.seed).shuffle(mixed_lines)
@@ -140,7 +161,10 @@ def build_demo_manifests(args: argparse.Namespace) -> dict[str, Path]:
     print("Demo samples:")
     for label, lines in sorted(samples_by_label.items()):
         print(f"  c{label}: {len(lines)}")
-    print(f"Train demo: {len(train_lines)}, val demo: {len(val_lines)}, replay: {len(replay_lines)}, mixed: {len(mixed_lines)}")
+    print(
+        f"Train demo: {len(train_lines)}, val demo: {len(val_lines)}, "
+        f"val_split={args.val_split_mode}, replay: {len(replay_lines)}, mixed: {len(mixed_lines)}"
+    )
     return paths
 
 
@@ -213,12 +237,23 @@ def main() -> None:
     config["train"]["epochs"] = args.epochs
     config["train"]["lr"] = args.lr
     config["train"]["weight_decay"] = args.weight_decay
+    config["train"]["warmup_epochs"] = args.warmup_epochs
     config["train"]["freeze_backbone"] = args.freeze_backbone
     config["train"]["save_best_metric"] = "val_macro_f1"
     config["train"]["class_weights"] = None
+    if args.drop_path_rate is not None:
+        config["train"]["mobilenet_v4_drop_path"] = args.drop_path_rate
+    if args.no_ema:
+        config["train"].setdefault("ema", {})["enabled"] = False
+    elif args.ema_decay is not None:
+        config["train"].setdefault("ema", {})["enabled"] = True
+        config["train"]["ema"]["decay"] = args.ema_decay
 
     seed_everything(args.seed, deterministic=bool(config["train"].get("deterministic", True)))
     paths = build_demo_manifests(args)
+    if args.prepare_only:
+        print("Manifest preparation finished.")
+        return
     device = resolve_device(args.device)
     dataloaders = build_loaders(config, paths, args)
 
@@ -228,6 +263,7 @@ def main() -> None:
         pretrained=False,
         freeze_backbone=args.freeze_backbone,
         dropout=config["train"].get("dropout"),
+        drop_path_rate=config["train"].get("mobilenet_v4_drop_path"),
     ).to(device)
 
     base_checkpoint = load_checkpoint(args.base_checkpoint, map_location=device)
@@ -238,6 +274,12 @@ def main() -> None:
         print(f"GPU: {torch.cuda.get_device_name(device)}")
     print(f"Loaded base checkpoint: {args.base_checkpoint}")
     print(f"Model: {info.name}, total_params={info.total_parameters}, trainable_params={info.trainable_parameters}")
+    print(
+        f"Fine-tune settings: epochs={args.epochs}, lr={args.lr:g}, "
+        f"warmup_epochs={args.warmup_epochs}, "
+        f"ema={config['train'].get('ema')}, "
+        f"drop_path={config['train'].get('mobilenet_v4_drop_path')}"
+    )
     print(f"Fine-tune checkpoints: {args.checkpoint_dir}")
 
     checkpoint_dir = Path(args.checkpoint_dir)

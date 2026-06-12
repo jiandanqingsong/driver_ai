@@ -30,6 +30,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-width", type=int, default=None)
     parser.add_argument("--camera-height", type=int, default=None)
     parser.add_argument("--camera-fps", type=float, default=None)
+    parser.add_argument(
+        "--camera-backend",
+        default=None,
+        choices=("auto", "dshow", "msmf", "v4l2", "default"),
+    )
+    parser.add_argument("--camera-fourcc", default=None)
+    parser.add_argument("--camera-buffer-size", type=int, default=None)
+    parser.add_argument("--camera-startup-timeout", type=float, default=None)
+    parser.add_argument("--camera-read-timeout", type=float, default=None)
+    parser.add_argument("--threaded-camera", dest="threaded_camera", action="store_true", default=None)
+    parser.add_argument("--no-threaded-camera", dest="threaded_camera", action="store_false")
     parser.add_argument("--jpeg-quality", type=int, default=None)
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument("--smoke-test", action="store_true", help="Process one frame and exit for quick validation.")
@@ -66,6 +77,18 @@ def main() -> None:
         realtime_cfg.setdefault("camera", {})["height"] = args.camera_height
     if args.camera_fps is not None:
         realtime_cfg.setdefault("camera", {})["fps"] = args.camera_fps
+    if args.camera_backend is not None:
+        realtime_cfg.setdefault("camera", {})["backend"] = args.camera_backend
+    if args.camera_fourcc is not None:
+        realtime_cfg.setdefault("camera", {})["fourcc"] = args.camera_fourcc
+    if args.camera_buffer_size is not None:
+        realtime_cfg.setdefault("camera", {})["buffer_size"] = args.camera_buffer_size
+    if args.camera_startup_timeout is not None:
+        realtime_cfg.setdefault("camera", {})["startup_timeout"] = args.camera_startup_timeout
+    if args.camera_read_timeout is not None:
+        realtime_cfg.setdefault("camera", {})["read_timeout"] = args.camera_read_timeout
+    if args.threaded_camera is not None:
+        realtime_cfg.setdefault("camera", {})["threaded"] = args.threaded_camera
     if args.jpeg_quality is not None:
         web_cfg["jpeg_quality"] = args.jpeg_quality
     if args.max_frames is not None:

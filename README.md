@@ -39,6 +39,7 @@ E:\ascend
 │   ├── realtime/
 │   │   ├── alarm.py
 │   │   ├── camera_demo.py
+│   │   ├── capture.py
 │   │   ├── decision.py
 │   │   ├── risk.py
 │   │   ├── smoothing.py
@@ -167,6 +168,20 @@ D:\Anaconda_envs\envs\driver_ai\python.exe scripts\export_onnx.py --config confi
 ```powershell
 D:\Anaconda_envs\envs\driver_ai\python.exe scripts\realtime_demo.py --config configs\config.yaml --source 0 --checkpoint outputs\checkpoints\mobilenet_v3_large\best.pt --model mobilenet_v3_large --device cuda
 ```
+
+Windows 新摄像头启动较慢时，显式使用 DirectShow：
+
+```powershell
+D:\Anaconda_envs\envs\driver_ai\python.exe scripts\realtime_demo.py --config configs\config.yaml --source 0 --checkpoint outputs\checkpoints\mobilenet_v3_large_demo_finetune\best.pt --model mobilenet_v3_large --device cuda --camera-backend dshow --camera-fourcc MJPG --camera-buffer-size 1
+```
+
+采集自定义场景数据时使用相同后端：
+
+```powershell
+D:\Anaconda_envs\envs\driver_ai\python.exe scripts\collect_demo_data.py --source 0 --backend dshow --fourcc MJPG --buffer-size 1 --width 1280 --height 720 --fps 30
+```
+
+启动日志会显示摄像头实际后端、打开耗时、分辨率、FPS 和 FOURCC。Windows 的 `auto` 默认使用 DirectShow，避免部分 USB 摄像头通过 MSMF 初始化时等待一分钟以上。如果 DirectShow 无法打开特定摄像头，再显式改用 `--camera-backend msmf` 或采集脚本的 `--backend msmf`。
 
 运行 Web 版实时监控页面：
 
@@ -367,15 +382,20 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 | `driver_distraction/realtime/decision.py` | 混淆敏感的时序决策过滤，对易混淆类别要求连续帧确认后再切换稳定标签。 |
 | `driver_distraction/realtime/risk.py` | 动态风险评分、风险等级划分、异常行为持续时间统计和报警触发条件判断。 |
 | `driver_distraction/realtime/alarm.py` | 语音预警和报警冷却管理，支持 `pyttsx3` 异步播报。 |
+| `driver_distraction/realtime/capture.py` | 优化 OpenCV 摄像头初始化，支持后端选择、MJPG、低缓冲和只保留最新帧，减少 Windows USB 摄像头启动等待与推理延迟。 |
 | `driver_distraction/realtime/camera_demo.py` | PC 摄像头实时演示核心流程：取帧、预处理、模型推理、时序平滑、拒识、风险评估、报警、可视化和视频保存。 |
-| `driver_distraction/realtime/web_demo.py` | Web 版实时监控后端，提供 MJPEG 视频流、统计 JSON、报警状态和网页界面。 |
+| `driver_distraction/realtime/web_demo.py` | Web 版实时监控后端，提供 MJPEG 视频流、统计 JSON、中文报警状态和模板加载。 |
+| `driver_distraction/realtime/web_dashboard.html` | Web 监控界面，负责中文行为映射、风险可视化、概率统计、浏览器语音和响应式布局。 |
 
 ### 昇腾部署模块
 
 | 文件 | 功能 |
 | --- | --- |
 | `driver_distraction/deploy/ascend.py` | 根据配置生成 Ascend ATC 转换命令，便于将 ONNX 转为 OM。 |
+| `driver_distraction/deploy/acl_infer.py` | 昇腾 ACL Python 推理封装，负责 OM 加载、设备内存复用、推理执行、输出拷贝和分类后处理。 |
 | `deploy/README_ascend.md` | 昇腾部署说明，描述 ONNX 到 OM 的转换准备。 |
+| `deploy/README_board.md` | 昇腾开发板部署与 ACL Python 单图推理说明。 |
+| `deploy/requirements_board.txt` | 板端最小 Python 依赖，不包含由 CANN 提供的 `acl` 模块。 |
 | `deploy/ascend_atc_template.sh` | ATC 命令模板脚本，用于在 Ascend Toolkit 环境中转换 OM 模型。 |
 
 ### 工具模块
@@ -398,6 +418,7 @@ State Farm test 集共有 3866 张图片。基础 MobileNetV3-Large 的整体结
 | `scripts/analyze_confusions.py` | 从混淆矩阵 CSV 中提取主要误判类别对。 |
 | `scripts/grad_cam.py` | Grad-CAM 命令行入口，生成热力图和叠加图。 |
 | `scripts/export_onnx.py` | ONNX 导出入口，为后续昇腾 ATC 转 OM 做准备。 |
+| `scripts/ascend_infer.py` | 昇腾开发板 OM 单图推理入口，支持中文 Top-K 结果、JSON 输出和延迟测试。 |
 | `scripts/realtime_demo.py` | PC 摄像头或视频实时演示入口。 |
 | `scripts/web_demo.py` | Web 版实时监控入口，支持本地浏览器查看画面、统计信息和语音提示。 |
 | `scripts/collect_demo_data.py` | 自采集演示场景脚本，可选择 C0-C9 类别，从摄像头按固定间隔采集图片。 |

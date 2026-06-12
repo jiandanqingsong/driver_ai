@@ -27,3 +27,16 @@ STATE_FARM_CLASS_NAMES = [
     "hair_and_makeup",
     "talking_to_passenger",
 ]
+
+STATE_FARM_CLASS_NAMES_ZH = [
+    "安全驾驶",
+    "右手发短信",
+    "右手打电话",
+    "左手发短信",
+    "左手打电话",
+    "操作中控设备",
+    "喝水",
+    "伸手取后排物品",
+    "整理头发或化妆",
+    "与乘客交谈",
+]

@@ -1,0 +1,1297 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>驾驶员安全监控中心</title>
+  <style>
+    :root {
+      --page: #eef1f4;
+      --surface: #ffffff;
+      --surface-soft: #f7f9fb;
+      --ink: #18202b;
+      --muted: #667085;
+      --muted-strong: #475467;
+      --line: #d8dee6;
+      --line-soft: #e8ecf1;
+      --accent: #0f766e;
+      --accent-soft: #e7f5f2;
+      --normal: #16835b;
+      --normal-soft: #eaf7f1;
+      --low: #2f6f9f;
+      --low-soft: #edf5fa;
+      --medium: #a86612;
+      --medium-soft: #fff5df;
+      --high: #c43d3d;
+      --high-soft: #fff0f0;
+      --video: #090d12;
+      --shadow: 0 8px 24px rgba(24, 32, 43, 0.08);
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--page);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background: var(--page);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      appearance: none;
+    }
+
+    .app-header {
+      height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 0 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      color: #ffffff;
+      background: var(--accent);
+      border-radius: 6px;
+    }
+
+    .brand-mark svg {
+      width: 21px;
+      height: 21px;
+      stroke-width: 1.9;
+    }
+
+    .brand-copy {
+      min-width: 0;
+    }
+
+    .brand-copy h1 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.3;
+      font-weight: 700;
+    }
+
+    .brand-copy p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .header-meta {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .system-meta {
+      min-width: 0;
+      display: flex;
+      gap: 16px;
+    }
+
+    .system-meta span {
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .connection {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 30px;
+      padding: 0 10px;
+      color: var(--muted-strong);
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #98a2b3;
+    }
+
+    .status-dot.running {
+      background: var(--normal);
+      box-shadow: 0 0 0 4px rgba(22, 131, 91, 0.12);
+    }
+
+    .status-dot.opening,
+    .status-dot.initializing {
+      background: var(--medium);
+      box-shadow: 0 0 0 4px rgba(168, 102, 18, 0.12);
+    }
+
+    .status-dot.error,
+    .status-dot.disconnected {
+      background: var(--high);
+      box-shadow: 0 0 0 4px rgba(196, 61, 61, 0.12);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+      gap: 18px;
+      max-width: 1680px;
+      min-height: calc(100vh - 68px);
+      margin: 0 auto;
+      padding: 18px;
+    }
+
+    .monitor-panel,
+    .insight-panel {
+      min-width: 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .monitor-panel {
+      align-self: start;
+      overflow: hidden;
+    }
+
+    .panel-heading {
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .panel-heading h2,
+    .section-heading h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .panel-heading-meta {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .video-stage {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background: var(--video);
+    }
+
+    #videoFeed {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+    }
+
+    .video-state {
+      position: absolute;
+      left: 16px;
+      bottom: 16px;
+      max-width: calc(100% - 32px);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 11px 14px;
+      color: #ffffff;
+      background: rgba(9, 13, 18, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 6px;
+      backdrop-filter: blur(8px);
+    }
+
+    .video-state-copy {
+      min-width: 0;
+    }
+
+    .video-state-copy span {
+      display: block;
+      margin-bottom: 3px;
+      color: rgba(255, 255, 255, 0.68);
+      font-size: 11px;
+    }
+
+    .video-state-copy strong {
+      display: block;
+      overflow: hidden;
+      font-size: 18px;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .video-confidence {
+      min-width: 58px;
+      padding-left: 14px;
+      border-left: 1px solid rgba(255, 255, 255, 0.18);
+      font-size: 18px;
+      font-weight: 700;
+      text-align: right;
+    }
+
+    .monitor-toolbar {
+      min-height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 10px 14px;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .source-meta {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .icon-button,
+    .text-button {
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 11px;
+      color: var(--muted-strong);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .icon-button {
+      width: 36px;
+      padding: 0;
+    }
+
+    .icon-button svg,
+    .text-button svg {
+      width: 16px;
+      height: 16px;
+      stroke-width: 1.9;
+    }
+
+    .icon-button:hover,
+    .text-button:hover {
+      border-color: #aeb8c5;
+      background: var(--surface-soft);
+    }
+
+    .icon-button:focus-visible,
+    .text-button:focus-visible,
+    .voice-switch input:focus-visible + .switch-track {
+      outline: 3px solid rgba(15, 118, 110, 0.2);
+      outline-offset: 2px;
+    }
+
+    .voice-switch {
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      color: var(--muted-strong);
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .voice-switch input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .switch-track {
+      position: relative;
+      width: 32px;
+      height: 18px;
+      flex: 0 0 auto;
+      background: #b7c0cb;
+      border-radius: 9px;
+      transition: background 160ms ease;
+    }
+
+    .switch-track::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 12px;
+      height: 12px;
+      background: #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(24, 32, 43, 0.25);
+      transition: transform 160ms ease;
+    }
+
+    .voice-switch input:checked + .switch-track {
+      background: var(--accent);
+    }
+
+    .voice-switch input:checked + .switch-track::after {
+      transform: translateX(14px);
+    }
+
+    .session-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .session-item {
+      min-width: 0;
+      padding: 13px 16px;
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .session-item:last-child {
+      border-right: 0;
+    }
+
+    .session-item span {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .session-item strong {
+      display: block;
+      overflow: hidden;
+      font-size: 15px;
+      line-height: 1.3;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .insight-panel {
+      align-self: start;
+      overflow: hidden;
+    }
+
+    .insight-content {
+      padding: 16px;
+    }
+
+    .decision-block {
+      padding: 16px;
+      background: var(--normal-soft);
+      border-left: 4px solid var(--normal);
+      border-radius: 6px;
+    }
+
+    .decision-block.low {
+      background: var(--low-soft);
+      border-left-color: var(--low);
+    }
+
+    .decision-block.medium {
+      background: var(--medium-soft);
+      border-left-color: var(--medium);
+    }
+
+    .decision-block.high {
+      background: var(--high-soft);
+      border-left-color: var(--high);
+    }
+
+    .decision-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .decision-label {
+      color: var(--muted-strong);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .risk-label {
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 9px;
+      color: var(--normal);
+      background: #ffffff;
+      border: 1px solid rgba(22, 131, 91, 0.24);
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .decision-block.low .risk-label {
+      color: var(--low);
+      border-color: rgba(47, 111, 159, 0.24);
+    }
+
+    .decision-block.medium .risk-label {
+      color: var(--medium);
+      border-color: rgba(168, 102, 18, 0.24);
+    }
+
+    .decision-block.high .risk-label {
+      color: var(--high);
+      border-color: rgba(196, 61, 61, 0.24);
+    }
+
+    .decision-behavior {
+      margin: 12px 0 5px;
+      font-size: 28px;
+      line-height: 1.25;
+      font-weight: 750;
+      word-break: break-word;
+    }
+
+    .decision-detail {
+      color: var(--muted-strong);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .meter-row {
+      display: grid;
+      grid-template-columns: 66px 1fr 48px;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+      color: var(--muted-strong);
+      font-size: 12px;
+    }
+
+    .meter-track {
+      height: 7px;
+      overflow: hidden;
+      background: rgba(71, 84, 103, 0.14);
+      border-radius: 4px;
+    }
+
+    .meter-fill {
+      width: 0;
+      height: 100%;
+      background: var(--accent);
+      border-radius: inherit;
+      transition: width 220ms ease;
+    }
+
+    #riskFill {
+      background: var(--normal);
+    }
+
+    .decision-block.low #riskFill {
+      background: var(--low);
+    }
+
+    .decision-block.medium #riskFill {
+      background: var(--medium);
+    }
+
+    .decision-block.high #riskFill {
+      background: var(--high);
+    }
+
+    .key-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 16px;
+      border-top: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .key-metric {
+      min-width: 0;
+      padding: 14px 10px;
+      border-right: 1px solid var(--line-soft);
+      text-align: center;
+    }
+
+    .key-metric:last-child {
+      border-right: 0;
+    }
+
+    .key-metric span {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .key-metric strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .content-section {
+      padding-top: 18px;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .section-heading span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .prediction-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .prediction-row {
+      display: grid;
+      grid-template-columns: minmax(96px, 130px) 1fr 46px;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .prediction-name {
+      overflow: hidden;
+      color: var(--muted-strong);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .prediction-value {
+      color: var(--muted-strong);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .alarm-log {
+      min-height: 64px;
+      display: flex;
+      gap: 11px;
+      align-items: flex-start;
+      padding: 12px;
+      color: var(--muted-strong);
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .alarm-log svg {
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      margin-top: 1px;
+      color: var(--medium);
+      stroke-width: 1.9;
+    }
+
+    .detail-section {
+      margin-top: 18px;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .detail-section summary {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted-strong);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      list-style: none;
+    }
+
+    .detail-section summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .detail-section summary svg {
+      width: 16px;
+      height: 16px;
+      transition: transform 160ms ease;
+    }
+
+    .detail-section[open] summary svg {
+      transform: rotate(180deg);
+    }
+
+    .counts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding-bottom: 4px;
+    }
+
+    .count-item {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 9px;
+      background: var(--surface-soft);
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .count-item span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .count-item strong {
+      color: var(--ink);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .error-banner {
+      display: none;
+      margin: 0 16px 16px;
+      padding: 10px 12px;
+      color: #8f2525;
+      background: var(--high-soft);
+      border: 1px solid rgba(196, 61, 61, 0.24);
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .error-banner.visible {
+      display: block;
+    }
+
+    @media (max-width: 1080px) {
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .insight-panel {
+        width: 100%;
+      }
+
+      .insight-content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(300px, 0.82fr);
+        gap: 18px;
+      }
+
+      .decision-column,
+      .analysis-column {
+        min-width: 0;
+      }
+
+      .content-section:first-child {
+        padding-top: 0;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .app-header {
+        height: auto;
+        align-items: flex-start;
+        padding: 13px 14px;
+      }
+
+      .brand-copy p,
+      .system-meta {
+        display: none;
+      }
+
+      .workspace {
+        gap: 12px;
+        padding: 12px;
+      }
+
+      .panel-heading {
+        min-height: 48px;
+      }
+
+      .monitor-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .controls {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .source-meta {
+        width: 100%;
+      }
+
+      .session-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .session-item:nth-child(2) {
+        border-right: 0;
+      }
+
+      .session-item:nth-child(-n + 2) {
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .insight-content {
+        display: block;
+      }
+
+      .analysis-column .content-section:first-child {
+        padding-top: 18px;
+      }
+
+      .decision-behavior {
+        font-size: 24px;
+      }
+
+      .video-state {
+        left: 10px;
+        bottom: 10px;
+        max-width: calc(100% - 20px);
+      }
+    }
+
+    @media (max-width: 440px) {
+      .brand-copy h1 {
+        font-size: 15px;
+      }
+
+      .connection {
+        padding: 0 8px;
+      }
+
+      .voice-switch {
+        flex: 1 1 auto;
+      }
+
+      .text-button span {
+        display: none;
+      }
+
+      .text-button {
+        width: 36px;
+        padding: 0;
+      }
+
+      .prediction-row {
+        grid-template-columns: minmax(86px, 112px) 1fr 42px;
+        gap: 8px;
+      }
+
+      .counts {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11a9 9 0 0 1 18 0" />
+          <path d="M5 17h2l2-5h6l2 5h2" />
+          <path d="M8 17h8" />
+          <path d="M12 12v5" />
+        </svg>
+      </div>
+      <div class="brand-copy">
+        <h1>驾驶员安全监控中心</h1>
+        <p>分心行为识别与动态风险评估</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <div class="system-meta" aria-label="运行环境">
+        <span id="deviceText">计算设备：--</span>
+        <span id="modelText">识别模型：--</span>
+      </div>
+      <div class="connection" aria-live="polite">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">正在连接</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="monitor-panel" aria-labelledby="monitorTitle">
+      <div class="panel-heading">
+        <h2 id="monitorTitle">实时监控画面</h2>
+        <span id="updatedText" class="panel-heading-meta">等待数据</span>
+      </div>
+
+      <div class="video-stage">
+        <img id="videoFeed" src="/video_feed" alt="驾驶员实时监控画面" />
+        <div class="video-state" aria-live="polite">
+          <div class="video-state-copy">
+            <span>当前识别行为</span>
+            <strong id="videoLabelText">等待识别</strong>
+          </div>
+          <div id="videoConfText" class="video-confidence">0%</div>
+        </div>
+      </div>
+
+      <div class="monitor-toolbar">
+        <span id="sourceText" class="source-meta">视频源：--</span>
+        <div class="controls">
+          <label class="voice-switch" title="启用浏览器中文语音预警">
+            <input id="voiceToggle" type="checkbox" __VOICE_CHECKED__ />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span>语音预警</span>
+          </label>
+          <button id="testVoice" class="text-button" type="button" title="测试语音">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+              <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+              <path d="M19 5a10 10 0 0 1 0 14" />
+            </svg>
+            <span>测试语音</span>
+          </button>
+          <button id="resetStats" class="text-button" type="button" title="重置本次统计">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+            <span>重置统计</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="session-strip" aria-label="运行统计">
+        <div class="session-item">
+          <span>实时帧率</span>
+          <strong id="fpsText">0.0 FPS</strong>
+        </div>
+        <div class="session-item">
+          <span>运行时长</span>
+          <strong id="runtimeText">00:00:00</strong>
+        </div>
+        <div class="session-item">
+          <span>已处理帧数</span>
+          <strong id="frameText">0</strong>
+        </div>
+        <div class="session-item">
+          <span>原始预测</span>
+          <strong id="rawText">等待识别</strong>
+        </div>
+      </div>
+    </section>
+
+    <aside class="insight-panel" aria-labelledby="decisionTitle">
+      <div class="panel-heading">
+        <h2 id="decisionTitle">识别与风险状态</h2>
+        <span id="ambiguityText" class="panel-heading-meta">时序平滑已启用</span>
+      </div>
+
+      <div class="insight-content">
+        <div class="decision-column">
+          <section id="decisionBlock" class="decision-block">
+            <div class="decision-topline">
+              <span class="decision-label">稳定识别结果</span>
+              <span id="riskLevelText" class="risk-label">风险正常</span>
+            </div>
+            <div id="labelText" class="decision-behavior">等待识别</div>
+            <div id="decisionDetail" class="decision-detail">系统正在建立稳定的时序判断</div>
+
+            <div class="meter-row">
+              <span>识别置信度</span>
+              <div class="meter-track" aria-hidden="true">
+                <div id="confidenceFill" class="meter-fill"></div>
+              </div>
+              <strong id="confText">0%</strong>
+            </div>
+            <div class="meter-row">
+              <span>动态风险值</span>
+              <div class="meter-track" aria-hidden="true">
+                <div id="riskFill" class="meter-fill"></div>
+              </div>
+              <strong id="riskScoreText">0.0</strong>
+            </div>
+          </section>
+
+          <div class="key-metrics">
+            <div class="key-metric">
+              <span>异常持续</span>
+              <strong id="holdText">0.0 秒</strong>
+            </div>
+            <div class="key-metric">
+              <span>报警冷却</span>
+              <strong id="cooldownText">就绪</strong>
+            </div>
+            <div class="key-metric">
+              <span>累计报警</span>
+              <strong id="alarmCountText">0 次</strong>
+            </div>
+          </div>
+
+          <section class="content-section" aria-labelledby="alarmTitle">
+            <div class="section-heading">
+              <h3 id="alarmTitle">最近报警</h3>
+              <span id="alarmTimeText">暂无记录</span>
+            </div>
+            <div id="alarmLog" class="alarm-log" aria-live="polite">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z" />
+                <path d="M12 9v4" />
+                <path d="M12 17h.01" />
+              </svg>
+              <span id="alarmLogText">当前没有触发报警</span>
+            </div>
+          </section>
+        </div>
+
+        <div class="analysis-column">
+          <section class="content-section" aria-labelledby="predictionTitle">
+            <div class="section-heading">
+              <h3 id="predictionTitle">行为概率排序</h3>
+              <span>前 5 项</span>
+            </div>
+            <div id="topBars" class="prediction-list"></div>
+          </section>
+
+          <details class="detail-section">
+            <summary>
+              <span>查看本次行为统计</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </summary>
+            <div id="counts" class="counts"></div>
+          </details>
+        </div>
+      </div>
+
+      <div id="errorBanner" class="error-banner" role="alert"></div>
+    </aside>
+  </main>
+
+  <script>
+    const statsIntervalMs = __STATS_INTERVAL_MS__;
+    const behaviorNames = {
+      safe_driving: "安全驾驶",
+      texting_right: "右手发短信",
+      talking_phone_right: "右手打电话",
+      texting_left: "左手发短信",
+      talking_phone_left: "左手打电话",
+      operating_radio: "操作中控设备",
+      drinking: "喝水",
+      reaching_behind: "伸手取后排物品",
+      hair_and_makeup: "整理头发或化妆",
+      talking_to_passenger: "与乘客交谈",
+      unknown: "未知行为",
+      waiting: "等待识别"
+    };
+    const riskNames = {
+      normal: "风险正常",
+      low: "低风险",
+      medium: "中风险",
+      high: "高风险"
+    };
+    const statusNames = {
+      initializing: "系统初始化",
+      opening: "连接摄像头",
+      running: "监控运行中",
+      finished: "视频已结束",
+      stopped: "监控已停止",
+      error: "运行异常",
+      disconnected: "连接已断开"
+    };
+
+    let lastAlarmId = 0;
+    let lastStats = null;
+
+    const $ = (id) => document.getElementById(id);
+    const clampPercent = (value) => Math.max(0, Math.min(100, Number(value || 0)));
+    const labelName = (label) => behaviorNames[label] || label || "等待识别";
+    const riskName = (level) => riskNames[level] || "风险未知";
+    const formatPercent = (value) => `${Math.round(clampPercent(Number(value || 0) * 100))}%`;
+    const formatNumber = (value, digits = 1) => Number(value || 0).toFixed(digits);
+
+    function formatDuration(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds || 0)));
+      const hours = String(Math.floor(total / 3600)).padStart(2, "0");
+      const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+      const secs = String(total % 60).padStart(2, "0");
+      return `${hours}:${minutes}:${secs}`;
+    }
+
+    function formatModelName(value) {
+      return String(value || "--")
+        .replace("mobilenet_v4", "MobileNet V4")
+        .replace("mobilenet_v3_large", "MobileNetV3-Large")
+        .replace("resnet18", "ResNet18");
+    }
+
+    function selectChineseVoice() {
+      return window.speechSynthesis
+        ?.getVoices()
+        .find((voice) => voice.lang.toLowerCase().startsWith("zh"));
+    }
+
+    function speak(message, force = false) {
+      if (!("speechSynthesis" in window) || (!force && !$("voiceToggle").checked) || !message) {
+        return;
+      }
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.lang = "zh-CN";
+      utterance.rate = 1.0;
+      const voice = selectChineseVoice();
+      if (voice) utterance.voice = voice;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function buildAlarmMessage(alarm) {
+      const behavior = labelName(alarm?.label);
+      const level = riskName(alarm?.level);
+      return `检测到${behavior}，当前为${level}，请注意驾驶安全。`;
+    }
+
+    function setRiskState(level) {
+      const normalized = ["normal", "low", "medium", "high"].includes(level) ? level : "normal";
+      $("decisionBlock").className = normalized === "normal"
+        ? "decision-block"
+        : `decision-block ${normalized}`;
+      $("riskLevelText").textContent = riskName(normalized);
+    }
+
+    function updatePredictions(predictions) {
+      const host = $("topBars");
+      host.innerHTML = "";
+      (predictions || []).forEach((item) => {
+        const probability = clampPercent(Number(item.probability || 0) * 100);
+        const row = document.createElement("div");
+        row.className = "prediction-row";
+
+        const name = document.createElement("span");
+        name.className = "prediction-name";
+        name.textContent = labelName(item.label);
+        name.title = name.textContent;
+
+        const track = document.createElement("div");
+        track.className = "meter-track";
+        const fill = document.createElement("div");
+        fill.className = "meter-fill";
+        fill.style.width = `${probability.toFixed(1)}%`;
+        track.appendChild(fill);
+
+        const value = document.createElement("span");
+        value.className = "prediction-value";
+        value.textContent = `${Math.round(probability)}%`;
+
+        row.append(name, track, value);
+        host.appendChild(row);
+      });
+    }
+
+    function updateCounts(counts) {
+      const host = $("counts");
+      host.innerHTML = "";
+      Object.entries(counts || {})
+        .sort((left, right) => right[1] - left[1])
+        .forEach(([name, count]) => {
+          const item = document.createElement("div");
+          item.className = "count-item";
+          const key = document.createElement("span");
+          key.textContent = labelName(name);
+          key.title = key.textContent;
+          const value = document.createElement("strong");
+          value.textContent = Number(count || 0).toLocaleString("zh-CN");
+          item.append(key, value);
+          host.appendChild(item);
+        });
+    }
+
+    function updateAlarm(data) {
+      if (data.error) {
+        $("alarmLogText").textContent = `系统错误：${data.error}`;
+        $("alarmTimeText").textContent = "需要处理";
+        return;
+      }
+
+      if (!data.alarm?.id) {
+        $("alarmLogText").textContent = "当前没有触发报警";
+        $("alarmTimeText").textContent = "暂无记录";
+        return;
+      }
+
+      const message = buildAlarmMessage(data.alarm);
+      $("alarmLogText").textContent = message;
+      $("alarmTimeText").textContent = data.alarm.last_time
+        ? new Date(data.alarm.last_time * 1000).toLocaleTimeString("zh-CN", { hour12: false })
+        : "刚刚";
+
+      if (data.alarm.id !== lastAlarmId) {
+        lastAlarmId = data.alarm.id;
+        speak(message);
+      }
+    }
+
+    function updateError(message = "") {
+      const banner = $("errorBanner");
+      banner.textContent = message;
+      banner.classList.toggle("visible", Boolean(message));
+    }
+
+    async function refreshStats() {
+      try {
+        const response = await fetch("/api/stats", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        lastStats = data;
+
+        const status = data.status || "disconnected";
+        const level = data.risk?.level || "normal";
+        const behavior = labelName(data.label);
+        const confidence = clampPercent(Number(data.confidence || 0) * 100);
+        const riskScore = clampPercent(data.risk?.score);
+        const cooldown = Math.max(0, Number(data.cooldown_remaining || 0));
+
+        $("statusText").textContent = statusNames[status] || status;
+        $("statusDot").className = `status-dot ${status}`;
+        $("deviceText").textContent = `计算设备：${data.device || "--"}`;
+        $("modelText").textContent = `识别模型：${formatModelName(data.model)}`;
+        $("sourceText").textContent = `视频源：${data.source || "--"}`;
+        $("updatedText").textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
+
+        $("labelText").textContent = behavior;
+        $("videoLabelText").textContent = behavior;
+        $("confText").textContent = `${Math.round(confidence)}%`;
+        $("videoConfText").textContent = `${Math.round(confidence)}%`;
+        $("confidenceFill").style.width = `${confidence.toFixed(1)}%`;
+
+        setRiskState(level);
+        $("riskScoreText").textContent = formatNumber(riskScore, 1);
+        $("riskFill").style.width = `${riskScore.toFixed(1)}%`;
+        $("holdText").textContent = `${formatNumber(data.risk?.abnormal_seconds, 1)} 秒`;
+        $("cooldownText").textContent = cooldown > 0 ? `${formatNumber(cooldown, 1)} 秒` : "就绪";
+        $("alarmCountText").textContent = `${data.alarm?.count || 0} 次`;
+
+        $("fpsText").textContent = `${formatNumber(data.fps, 1)} FPS`;
+        $("runtimeText").textContent = formatDuration(data.runtime_seconds);
+        $("frameText").textContent = Number(data.frame_count || 0).toLocaleString("zh-CN");
+        $("rawText").textContent = labelName(data.raw_label);
+        $("rawText").title = `原始置信度 ${formatPercent(data.raw_confidence)}，分类间隔 ${formatNumber(data.margin, 2)}`;
+
+        $("ambiguityText").textContent = data.is_ambiguous ? "当前判断存在歧义" : "时序判断稳定";
+        $("decisionDetail").textContent = data.is_ambiguous
+          ? "相近行为概率接近，系统正在等待更多连续帧"
+          : `原始预测：${labelName(data.raw_label)}，分类间隔 ${formatNumber(data.margin, 2)}`;
+
+        updatePredictions(data.top_predictions);
+        updateCounts(data.class_counts);
+        updateAlarm(data);
+        updateError(data.error ? `后端运行异常：${data.error}` : "");
+      } catch (error) {
+        $("statusText").textContent = statusNames.disconnected;
+        $("statusDot").className = "status-dot disconnected";
+        updateError(`无法连接实时推理服务：${error.message || error}`);
+      }
+    }
+
+    $("testVoice").addEventListener("click", () => {
+      speak("语音预警测试，驾驶员安全监控系统运行正常。", true);
+    });
+
+    $("resetStats").addEventListener("click", async () => {
+      const button = $("resetStats");
+      button.disabled = true;
+      try {
+        const response = await fetch("/api/reset", { method: "POST" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        lastAlarmId = 0;
+        await refreshStats();
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    refreshStats();
+    setInterval(refreshStats, statsIntervalMs);
+  </script>
+</body>
+</html>

@@ -11,6 +11,8 @@ import cv2
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from driver_distraction.realtime.capture import open_optimized_capture
+
 
 CLASS_LABELS = {
     "c0": "safe_driving",
@@ -35,6 +37,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=float, default=5.0, help="Countdown seconds after clicking start.")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--fps", type=float, default=30.0)
+    parser.add_argument(
+        "--backend",
+        default="auto",
+        choices=("auto", "dshow", "msmf", "v4l2", "default"),
+        help="OpenCV camera backend. On Windows, auto uses DirectShow.",
+    )
+    parser.add_argument("--fourcc", default="MJPG", help="Preferred camera pixel format.")
+    parser.add_argument("--buffer-size", type=int, default=1)
+    parser.add_argument("--startup-timeout", type=float, default=8.0)
+    parser.add_argument("--read-timeout", type=float, default=2.0)
     parser.add_argument("--quality", type=int, default=95)
     parser.add_argument("--class-id", choices=sorted(CLASS_LABELS), default=None, help="Skip GUI and record this class.")
     parser.add_argument("--no-voice", action="store_true")
@@ -114,18 +127,6 @@ def next_index(output_dir: Path, class_id: str) -> int:
     return max_index + 1
 
 
-def open_capture(source: str, width: int, height: int):
-    video_source = int(source) if source.isdigit() else source
-    cap = cv2.VideoCapture(video_source)
-    if width > 0:
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    if height > 0:
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera/video source: {source}")
-    return cap
-
-
 def draw_status(frame, lines: list[str]):
     panel_height = 92
     cv2.rectangle(frame, (0, 0), (frame.shape[1], panel_height), (20, 20, 20), -1)
@@ -149,7 +150,18 @@ def run_collection(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_root) / class_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cap = open_capture(args.source, args.width, args.height)
+    cap = open_optimized_capture(
+        source=args.source,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        backend=args.backend,
+        fourcc=args.fourcc,
+        buffer_size=args.buffer_size,
+        startup_timeout=args.startup_timeout,
+        read_timeout=args.read_timeout,
+        threaded=True,
+    )
     window_name = f"Collect {class_id.upper()} - {class_name}"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 

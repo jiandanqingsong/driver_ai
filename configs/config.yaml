@@ -130,6 +130,16 @@ realtime:
     width: 1280
     height: 720
     fps: 30
+    # Windows auto uses DirectShow for predictable startup. Set msmf explicitly
+    # only when a camera does not support DirectShow.
+    backend: auto
+    # MJPG avoids expensive uncompressed USB capture at 720p/30 FPS.
+    fourcc: MJPG
+    buffer_size: 1
+    startup_timeout: 8.0
+    read_timeout: 2.0
+    # Keep only the newest camera frame to reduce inference latency.
+    threaded: true
   confidence_threshold: 0.55
   unknown_label: unknown
   ema_alpha: 0.35

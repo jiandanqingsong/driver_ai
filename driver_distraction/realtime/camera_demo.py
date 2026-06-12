@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import cv2
@@ -13,6 +14,7 @@ from driver_distraction.constants import STATE_FARM_CLASS_NAMES
 from driver_distraction.data.transforms import build_realtime_transform
 from driver_distraction.models.factory import build_model
 from driver_distraction.realtime.alarm import AlarmManager
+from driver_distraction.realtime.capture import open_optimized_capture
 from driver_distraction.realtime.decision import TemporalDecisionFilter
 from driver_distraction.realtime.risk import RiskAssessor
 from driver_distraction.realtime.smoothing import EMASmoother
@@ -114,7 +116,10 @@ def run_camera_demo(config: dict[str, Any], source: int | str | None = None) -> 
     device_name = config["project"].get("device", "cuda")
     device = torch.device(device_name if torch.cuda.is_available() and device_name == "cuda" else "cpu")
 
+    model_started_at = time.perf_counter()
+    print(f"Loading realtime model on {device}...")
     model = load_realtime_model(config, device)
+    print(f"Realtime model ready in {time.perf_counter() - model_started_at:.2f}s.")
     transform = build_realtime_transform(int(realtime_cfg["input_size"]))
     smoothing_cfg = realtime_cfg.get("temporal_smoothing", {})
     smoothing_enabled = bool(smoothing_cfg.get("enabled", True))
@@ -138,20 +143,19 @@ def run_camera_demo(config: dict[str, Any], source: int | str | None = None) -> 
     )
 
     video_source = realtime_cfg["source"] if source is None else source
-    if isinstance(video_source, str) and video_source.isdigit():
-        video_source = int(video_source)
-
-    cap = cv2.VideoCapture(video_source)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video source: {video_source}")
-
     camera_cfg = realtime_cfg.get("camera", {})
-    if camera_cfg.get("width"):
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera_cfg["width"]))
-    if camera_cfg.get("height"):
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera_cfg["height"]))
-    if camera_cfg.get("fps"):
-        cap.set(cv2.CAP_PROP_FPS, float(camera_cfg["fps"]))
+    cap = open_optimized_capture(
+        source=video_source,
+        width=int(camera_cfg.get("width", 0) or 0),
+        height=int(camera_cfg.get("height", 0) or 0),
+        fps=float(camera_cfg.get("fps", 0) or 0),
+        backend=str(camera_cfg.get("backend", "auto")),
+        fourcc=str(camera_cfg.get("fourcc", "MJPG")),
+        buffer_size=int(camera_cfg.get("buffer_size", 1)),
+        startup_timeout=float(camera_cfg.get("startup_timeout", 8.0)),
+        read_timeout=float(camera_cfg.get("read_timeout", 2.0)),
+        threaded=bool(camera_cfg.get("threaded", True)),
+    )
 
     window_name = str(realtime_cfg.get("window_name", "Driver Distraction Risk Demo"))
     show_window = bool(realtime_cfg.get("show_window", True))

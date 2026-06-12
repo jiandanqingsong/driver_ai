@@ -26,12 +26,24 @@ cfg = load_config("configs/config.yaml")
 print(" ".join(build_atc_command(cfg)))
 ```
 
-## 3. Deployment placeholders
+## 3. Run ACL Python inference
 
-After OM generation, connect the `.om` model with one of these inference runtimes:
+After OM generation, install the board-side dependencies:
 
-- Ascend ACL C++/Python
-- MindX SDK StreamManager
-- Atlas edge device application
+```bash
+python3 -m pip install -r deploy/requirements_board.txt
+```
 
-Keep preprocessing consistent with `driver_distraction/data/transforms.py`.
+Then run:
+
+```bash
+python3 scripts/ascend_infer.py \
+  --model deploy/models/mobilenet_v3_large_demo_finetune_driver_distraction.om \
+  --image data/test_driver.jpg
+```
+
+The implementation is in `driver_distraction/deploy/acl_infer.py`. It uses
+AscendCL Python directly and keeps preprocessing consistent with
+`driver_distraction/data/transforms.py`.
+
+See `deploy/README_board.md` for the complete board workflow.
